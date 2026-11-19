@@ -8,6 +8,7 @@ import { RouterProvider, useRouter } from "./router/RouterContext";
 // The public product and help pages are rendered from the original public source.
 import HomePage from "./pages/HomePage";
 import { DemoAccess } from "./pages/DemoAccess";
+import SecureLogin from "./pages/SecureLogin";
 import BankingWorkspace from "./portal/BankingWorkspace";
 import AdminApp from "./admin/AdminApp";
 import PublicPage, { officialSource } from "./public/PublicPage";
@@ -27,7 +28,7 @@ function AppRoutes({ onLeave }: { onLeave: (url: string) => void }) {
   if (p === "/" || p === "/home") return <HomePage onLeave={onLeave} />;
   // Demo sign-on stays local (no credentials are collected). Locations and
   // appointments live on their real interactive services, not public pages.
-  if (p === "/sign-on" || p === "/login") return <DemoAccess />;
+  if (p === "/sign-on" || p === "/login") return <SecureLogin />;
   if (["/locations", "/appointments", "/atms", "/maa"].includes(p) || p.startsWith("/auth/login")) {
     return <SecureDestination path={p} />;
   }
@@ -47,13 +48,14 @@ function MainApp() {
   const isPortal = /^\/portal(?:\/|$)/.test(normalizedPortalPath(path.toLowerCase()));
   const isAdmin = /^\/admin(?:\/|$)/.test(path.toLowerCase());
   const isStandalonePublic = path.toLowerCase().replace(/\/+$/, "") === "/search";
+  const isSecureLogin = ["/sign-on", "/login"].includes(path.toLowerCase().replace(/\/+$/, "") || "/");
 
   return (
     <>
       <link rel="icon" type="image/jpeg" href={favicon} />
-      {!isPortal && !isAdmin && !isStandalonePublic && <Header key={path} />}
+      {!isPortal && !isAdmin && !isStandalonePublic && !isSecureLogin && <Header key={path} />}
       <AppRoutes onLeave={setLeaveUrl} />
-      {!isPortal && !isAdmin && !isStandalonePublic && <SiteFooter onLeave={setLeaveUrl} />}
+      {!isPortal && !isAdmin && !isStandalonePublic && !isSecureLogin && <SiteFooter onLeave={setLeaveUrl} />}
       {leaveUrl && <ExternalLinkDialog url={leaveUrl} onClose={() => setLeaveUrl(null)} />}
     </>
   );
