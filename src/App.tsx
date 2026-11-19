@@ -26,10 +26,7 @@ function AppRoutes({ onLeave }: { onLeave: (url: string) => void }) {
     return <BankingWorkspace onLeave={onLeave} />;
   }
   if (/^\/admin(?:\/|$)/.test(p)) return <AdminApp />;
-  if (p === "/" || p === "/home") {
-    if (!isDemoSignedIn()) return <SecureLogin onLeave={onLeave} />;
-    return <HomePage onLeave={onLeave} />;
-  }
+  if (p === "\/" || p === "\/home") return <HomePage onLeave={onLeave} />;
   // Demo sign-on stays local (no credentials are collected). Locations and
   // appointments live on their real interactive services, not public pages.
   if (p === "/sign-on" || p === "/login") return <SecureLogin onLeave={onLeave} />;
