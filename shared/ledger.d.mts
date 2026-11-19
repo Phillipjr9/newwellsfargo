@@ -1,0 +1,11 @@
+import type { Account, Command, Workspace } from "../src/portal/model";
+export function day(offset?: number, base?: string | Date): string;
+export const PEOPLE: {id: string; name: string; detail: string}[];
+export const WIRE_RECIPIENTS: typeof PEOPLE;
+export const LINKED_SAMPLES: Account[];
+export function createWorkspace(): Workspace;
+export function settleDue(state: Workspace, today?: string): boolean;
+export function validateDraft(state: Workspace, input: object): { fromName: string; toName: string };
+export const MOBILE_DEPOSIT_LIMITS: { daily: number; rolling30: number };
+export function mobileDepositUsage(state: Workspace, today: string): { todayTotal: number; rollingTotal: number };
+export function applyAction(state: Workspace, command: Command, today?: string): { state: Workspace; result: string | null };

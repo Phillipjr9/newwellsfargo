@@ -1,0 +1,36 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Ledger and API tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Browser flows (demo ledger)
+        run: |
+          npx playwright install --with-deps chromium
+          (DEMO_ADMIN_TOKEN=browser-test-admin npm run dev -- --host 127.0.0.1 --port 5173 --strictPort &)
+          for i in $(seq 1 40); do curl -sf -o /dev/null http://127.0.0.1:5173/portal && break; sleep 1; done
+          node tests/portal.browser.cjs
+          node tests/interactivity-check.cjs
+          node tests/public-preview.cjs
+          SAMPLE=120 node tests/source-audit.cjs
+          DEMO_ADMIN_TOKEN=browser-test-admin node tests/admin.browser.cjs
+      - name: Super-admin isolated integration
+        run: npm run test:admin
+      - name: Mobile deposit flow
+        run: npm run test:deposit

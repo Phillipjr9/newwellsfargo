@@ -1,0 +1,10 @@
+.public-page-host { display: block; min-height: 260px; background: #fff; }
+.public-page-loading { max-width: 900px; margin: 60px auto; padding: 28px; color: #6d625b; }
+.public-page-error { max-width: 760px; margin: 60px auto; padding: 32px 24px; }
+.public-page-error h1 { font-size: 36px; font-weight: 400; }
+.public-page-error p { margin: 18px 0 28px; color: #74665e; }
+.public-page-error > div { display: flex; gap: 16px; flex-wrap: wrap; }
+.public-page-error a, .public-page-error button { display: inline-flex; align-items: center; gap: 8px; }
+.public-page-cache-note { padding: 12px 24px; background: #f9f7f6; color: #756b63; font-size: 13px; text-align: center; }
+.public-page-cache-note a { color: #5a469b; text-decoration: underline; }
+@media (max-width: 540px) { .public-page-loading, .public-page-error { margin: 28px auto; } }
