@@ -7,7 +7,6 @@ import { RouterProvider, useRouter } from "./router/RouterContext";
 
 // The public product and help pages are rendered from the original public source.
 import HomePage from "./pages/HomePage";
-import { DemoAccess } from "./pages/DemoAccess";
 import SecureLogin from "./pages/SecureLogin";
 import BankingWorkspace from "./portal/BankingWorkspace";
 import AdminApp from "./admin/AdminApp";
@@ -28,7 +27,7 @@ function AppRoutes({ onLeave }: { onLeave: (url: string) => void }) {
   if (p === "/" || p === "/home") return <HomePage onLeave={onLeave} />;
   // Demo sign-on stays local (no credentials are collected). Locations and
   // appointments live on their real interactive services, not public pages.
-  if (p === "/sign-on" || p === "/login") return <SecureLogin />;
+  if (p === "/sign-on" || p === "/login") return <SecureLogin onLeave={onLeave} />;
   if (["/locations", "/appointments", "/atms", "/maa"].includes(p) || p.startsWith("/auth/login")) {
     return <SecureDestination path={p} />;
   }

