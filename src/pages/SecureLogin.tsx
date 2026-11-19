@@ -3,6 +3,7 @@ import { useRouter } from "../router/RouterContext";
 import Logo from "../components/Logo";
 import SiteFooter from "../components/SiteFooter";
 import type { OutsideLinkHandler } from "../components/ContentSections";
+import { signDemoIn } from "../auth";
 import "./secure-login.css";
 
 function SearchIcon() {
@@ -26,6 +27,7 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    signDemoIn(username);
     navigate("/portal");
   }
 
@@ -35,7 +37,7 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
         <div className="secure-login-header-inner">
           <Logo />
           <nav className="secure-login-utility" aria-label="Header navigation">
-            <a href="https://oam.wellsfargo.com/oamo/identity/authentication?execution=e1s1" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://oam.wellsfargo.com/oamo/identity/authentication?execution=e1s1"); }}>Enroll</a>
+            <a href="/enroll" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); navigate("/enroll"); }}>Enroll</a>
             <a href="https://www.wellsfargo.com/help/" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://www.wellsfargo.com/help/"); }}>Customer Service</a>
             <a href="/locations">ATMs/Locations</a>
             <a href="https://www.wellsfargo.com/es/" lang="es" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://www.wellsfargo.com/es/"); }}>Español</a>
@@ -91,7 +93,7 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
           </form>
 
           <div className="secure-login-divider"><span>or</span></div>
-          <button type="button" className="secure-login-passkey" onClick={() => navigate("/portal")}><PasskeyIcon />Use a passkey</button>
+          <button type="button" className="secure-login-passkey" onClick={() => { signDemoIn(username || "demo-passkey"); navigate("/portal"); }}><PasskeyIcon />Use a passkey</button>
           <p className="secure-login-passkey-copy">Don't have one? Create a passkey after signing on and skip the password next time.</p>
 
           <a className="secure-login-forgot" href="https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/"); }}><span aria-hidden="true">→</span> Forgot username or password?</a>

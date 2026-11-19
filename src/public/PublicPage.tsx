@@ -73,7 +73,7 @@ export function officialSource(path: string) {
   if (normalized === "/lifesync/") return "https://www.wellsfargo.com/mobile-online-banking/lifesync/";
   if (normalized === "/routing-number/") return "https://www.wellsfargo.com/help/routing-number/";
   if (normalized === "/rates/") return "https://www.wellsfargo.com/help/rates/";
-  if (normalized === "/sign-on/" || normalized === "/login/") return "https://connect.secure.wellsfargo.com/auth/login/present?origin=cob&LOB=CONS";
+  if (normalized === "/sign-on/" || normalized === "/login/") return "/login";
   if (normalized === "/locations/") return "https://locations.wellsfargo.com/search";
   if (normalized === "/appointments/") return "https://appointments.wellsfargo.com/maa/appointment/";
   return `https://www.wellsfargo.com${normalized}`;

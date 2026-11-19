@@ -21,11 +21,11 @@ function SignOnPreview() {
         </div>
         <div className="signon-actions">
           <a className="wf-button wf-button-red" href={SIGN_ON_URL}>Sign On</a>
-          <a href="https://oam.wellsfargo.com/oamo/identity/authentication?execution=e1s1">Enroll</a>
+          <a href="/enroll">Enroll</a>
         </div>
       </div>
       <div className="signon-links">
-        <a href="https://connect.secure.wellsfargo.com/auth/login/present?passkey=Y">Sign on with a passkey</a>
+        <a href="/login?passkey=1">Sign on with a passkey</a>
         <a href="https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/">Forgot username or password?</a>
         <a href={bankUrl("/privacy-security/fraud/")}>Security Center</a>
       </div>

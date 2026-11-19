@@ -28,6 +28,7 @@ import {
 import { useRouter } from "../router/RouterContext";
 import wordmark from "../assets/wf-logo.png";
 import { exitWorkspace } from "./store";
+import { signDemoOut } from "../auth";
 import type { Workspace } from "./model";
 
 type MenuEntry = { label: string; href: string; icon: LucideIcon };
@@ -141,7 +142,8 @@ export function PortalHeader({
     setExiting(true);
     try {
       await exitWorkspace();
-      navigate("/home");
+      signDemoOut();
+      navigate("/login");
     } catch {
       setExitError("Couldn't end this session. Please try again.");
       setExiting(false);
@@ -199,7 +201,7 @@ export function PortalHeader({
                 ])}
                 <button onClick={leave} disabled={exiting}>
                   <LogOut size={17} />
-                  {exiting ? "Ending session..." : "Exit demo"}
+                  {exiting ? "Ending session..." : "Exit demo & sign out"}
                 </button>
                 {exitError && <p role="alert">{exitError}</p>}
               </div>

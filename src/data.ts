@@ -3,7 +3,7 @@ export function bankUrl(path: string) {
   return path;
 }
 
-export const SIGN_ON_URL = "https://connect.secure.wellsfargo.com/auth/login/present?origin=cob&LOB=CONS";
+export const SIGN_ON_URL = "/login";
 export const APPOINTMENT_URL = "/appointments";
 export const LOCATIONS_URL = "/locations";
 
@@ -315,7 +315,7 @@ export const MENU_CATEGORIES: MenuCategory[] = [
           },
           {
             label: "Enroll in Wells Fargo Online®",
-            href: "https://oam.wellsfargo.com/oamo/identity/enrollment",
+            href: "/enroll",
             desc: "Use online banking to manage your auto loan",
           },
         ],
