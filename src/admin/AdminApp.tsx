@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import SiteFooter from "../components/SiteFooter";
 import {
   Activity,
   ArrowRight,
@@ -133,7 +134,7 @@ function Trend({ rows }: { rows: AdminData["dailyActivity"] }) {
   </svg><div className="ad-chart-labels">{data.map(d => <span key={d.key}>{d.label}</span>)}</div></div>;
 }
 
-function Login({ hint, onLogin }: { hint?: string | null; onLogin: () => void }) {
+function Login({ hint, onLogin, onLeave }: { hint?: string | null; onLogin: () => void; onLeave?: (url: string) => void }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -173,6 +174,7 @@ function Login({ hint, onLogin }: { hint?: string | null; onLogin: () => void })
       {!hint && <p className="ad-demo-hint">Set <code>DEMO_ADMIN_TOKEN</code> on the server to enable admin access.</p>}
       <p className="ad-login-foot"><ShieldCheck size={15}/> Activity is limited to fictional demo workspaces.</p>
     </section>
+    <SiteFooter onLeave={onLeave || (() => {})}/>
   </main>;
 }
 
@@ -232,7 +234,7 @@ function AdminSettings() {
 
 function Skeleton() { return <div className="ad-admin-loading"><span/><span/><span/></div>; }
 
-export default function AdminApp() {
+export default function AdminApp({ onLeave }: { onLeave?: (url: string) => void } = {}) {
   const { path: raw, navigate } = useRouter();
   const [auth,setAuth]=useState<boolean|null>(null),[hint,setHint]=useState<string|null>(null),[data,setData]=useState<AdminData|null>(null),[audit,setAudit]=useState<AuditEntry[]>([]),[loading,setLoading]=useState(false),[error,setError]=useState(""),[drawer,setDrawer]=useState("");
   const path=raw.toLowerCase().replace(/\/+$/,"")||"/admin";
@@ -242,5 +244,5 @@ export default function AdminApp() {
   useEffect(()=>{if(auth)void load()},[auth,load,page]);
   const select=(id:string)=>setDrawer(id);
   async function signout(){try{await api("session",{method:"DELETE",body:"{}"})}finally{setAuth(false);setData(null);setDrawer("");navigate("/admin")}}
-  return <main className="ad-shell"><header className="ad-top"><a href="/admin" className="ad-brand"><img src={wordmark} alt="Wells Fargo"/><span/><b>Preview control room</b></a>{auth&&<div className="ad-top-right"><span><i/> Fictional-data environment</span><button onClick={signout}><LogOut size={15}/>Sign out</button></div>}</header>{!auth?<Login hint={hint} onLogin={()=>{setAuth(true);setError("")}}/>:<div className="ad-layout"><aside className="ad-sidebar"><p className="ad-side-label">CONTROL ROOM</p>{([{id:"overview",label:"Overview",icon:LayoutDashboard,href:"/admin"},{id:"workspaces",label:"Workspaces",icon:UsersRound,href:"/admin/workspaces"},{id:"activity",label:"Audit trail",icon:HistoryIcon,href:"/admin/activity"},{id:"settings",label:"Settings",icon:Settings2,href:"/admin/settings"}] as const).map(({id,label,icon:Icon,href})=><a key={id} href={href} className={page===id?"active":""}><Icon size={17}/>{label}</a>)}<div className="ad-sidebar-bottom"><ShieldCheck size={18}/><span>Server-authenticated. Sample data only.</span></div></aside><section className="ad-content"><div className="ad-content-head"><div><span>WELLS FARGO <b>/</b> ADMIN</span><div>Demo operations</div></div><button disabled={loading} onClick={load}><RefreshCw size={15} className={loading?"ad-spin":""}/>Refresh</button></div>{error&&<p className="ad-alert" role="alert">{error} <button onClick={load}>Retry</button></p>}{!data?<Skeleton/>:page==="overview"?<Overview data={data} onSelect={select}/>:page==="workspaces"?<Workspaces rows={data.workspaces} onSelect={select} refresh={load}/>:page==="activity"?<Audit rows={audit} refresh={load}/>:<AdminSettings/>}<footer className="ad-legal"><ShieldCheck size={14}/>Independent preview administration · no connection to Wells Fargo production systems · sample customer records only</footer></section>{drawer&&<WorkspaceDetails id={drawer} onClose={()=>setDrawer("")} refresh={load}/>}</div>}</main>;
+  return <main className="ad-shell"><header className="ad-top"><a href="/admin" className="ad-brand"><img src={wordmark} alt="Wells Fargo"/><span/><b>Preview control room</b></a>{auth&&<div className="ad-top-right"><span><i/> Fictional-data environment</span><button onClick={signout}><LogOut size={15}/>Sign out</button></div>}</header>{!auth?<Login hint={hint} onLogin={()=>{setAuth(true);setError("")}} onLeave={onLeave}/>:<div className="ad-layout"><aside className="ad-sidebar"><p className="ad-side-label">CONTROL ROOM</p>{([{id:"overview",label:"Overview",icon:LayoutDashboard,href:"/admin"},{id:"workspaces",label:"Workspaces",icon:UsersRound,href:"/admin/workspaces"},{id:"activity",label:"Audit trail",icon:HistoryIcon,href:"/admin/activity"},{id:"settings",label:"Settings",icon:Settings2,href:"/admin/settings"}] as const).map(({id,label,icon:Icon,href})=><a key={id} href={href} className={page===id?"active":""}><Icon size={17}/>{label}</a>)}<div className="ad-sidebar-bottom"><ShieldCheck size={18}/><span>Server-authenticated. Sample data only.</span></div></aside><section className="ad-content"><div className="ad-content-head"><div><span>WELLS FARGO <b>/</b> ADMIN</span><div>Demo operations</div></div><button disabled={loading} onClick={load}><RefreshCw size={15} className={loading?"ad-spin":""}/>Refresh</button></div>{error&&<p className="ad-alert" role="alert">{error} <button onClick={load}>Retry</button></p>}{!data?<Skeleton/>:page==="overview"?<Overview data={data} onSelect={select}/>:page==="workspaces"?<Workspaces rows={data.workspaces} onSelect={select} refresh={load}/>:page==="activity"?<Audit rows={audit} refresh={load}/>:<AdminSettings/>}<footer className="ad-legal"><ShieldCheck size={14}/>Independent preview administration · no connection to Wells Fargo production systems · sample customer records only</footer><SiteFooter onLeave={onLeave || (() => {})}/></section>{drawer&&<WorkspaceDetails id={drawer} onClose={()=>setDrawer("")} refresh={load}/>}</div>}</main>;
 }
