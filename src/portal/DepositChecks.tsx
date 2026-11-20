@@ -109,7 +109,7 @@ function PhotoSlot({
         aria-label={`${file ? "Retake" : "Take or upload"} photo of ${label.toLowerCase()}`}
       >
         {preview ? (
-          <img src={preview} alt={`${label} preview`} />
+          <img src={preview} alt={`${label} check image`} />
         ) : (
           <span className="pb-photo-empty">
             <ImagePlus size={22} strokeWidth={1.4} />
@@ -239,7 +239,7 @@ export default function DepositChecks({
       <PageIntro
         eyebrow="Transfer & pay"
         title="Mobile check deposit"
-        description="A preview of Wells Fargo's five-step app flow, using the original screens and public deposit instructions."
+        description="Follow Wells Fargo's five-step app flow using public deposit instructions."
       />
       <PaymentNav kind="deposit" />
       <div className="pb-deposit-hero">
@@ -267,7 +267,7 @@ export default function DepositChecks({
         </section>
 
         {/* Right: the interactive flow */}
-        <section className="pb-panel pb-deposit-flow" aria-label="Deposit a sample check">
+        <section className="pb-panel pb-deposit-flow" aria-label="Deposit check">
           <div className="pb-stepper pb-deposit-steps">
             {STEPS.map((s, i) => (
               <span key={s.id} className={i === step ? "current" : i < step ? "done" : ""}>
@@ -282,9 +282,9 @@ export default function DepositChecks({
               <span className="pb-receipt-icon completed">
                 <CircleCheck size={30} />
               </span>
-              <h2>Sample deposit recorded</h2>
+              <h2>Deposit recorded</h2>
               <p className="pb-muted-copy">
-                {state.preferences.hideBalances ? "A sample deposit" : `A sample deposit of ${money(amountCents)}`} has been added to {account?.name}&apos;s demo ledger. No check image was sent to or processed by a bank. Reference {confirmedId}.
+                {state.preferences.hideBalances ? "Your deposit" : `A deposit of ${money(amountCents)}`} has been added to {account?.name}. No check image was sent to or processed by a bank. Reference {confirmedId}.
               </p>
               <ul className="pb-deposit-aftercare">
                 <li>Write “mobile deposit” and the date on the front of the check.</li>
@@ -322,7 +322,7 @@ export default function DepositChecks({
                             {state.preferences.hideBalances ? "hidden" : money(a.balance)}
                           </small>
                           <small>
-                            Example demo daily limit {money(MOBILE_DEPOSIT_LIMITS.daily)} · 30-day demo limit{" "}
+                            Daily limit {money(MOBILE_DEPOSIT_LIMITS.daily)} · 30-day limit{" "}
                             {money(MOBILE_DEPOSIT_LIMITS.rolling30)}
                           </small>
                         </span>
@@ -358,9 +358,9 @@ export default function DepositChecks({
                     </div>
                   </label>
                   <p className="pb-deposit-limits">
-                    Remaining example demo daily limit:{" "}
+                    Remaining daily limit:{" "}
                     {state.preferences.hideBalances ? "hidden" : money(remainingDaily)} · Remaining
-                    30-day demo limit: {state.preferences.hideBalances ? "hidden" : money(remaining30)}
+                    30-day limit: {state.preferences.hideBalances ? "hidden" : money(remaining30)}
                   </p>
                   <p className="pb-small-note">
                     <ShieldCheck size={15} />

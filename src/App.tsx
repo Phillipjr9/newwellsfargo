@@ -27,8 +27,8 @@ function AppRoutes({ onLeave }: { onLeave: (url: string) => void }) {
   }
   if (/^\/admin(?:\/|$)/.test(p)) return <AdminApp onLeave={onLeave} />;
   if (p === "\/" || p === "\/home") return <HomePage onLeave={onLeave} />;
-  // Demo sign-on stays local (no credentials are collected). Locations and
-  // appointments live on their real interactive services, not public pages.
+  // Sign-on stays local (no credentials are collected). Locations and
+  // appointments open the bank's real interactive services.
   if (p === "/sign-on" || p === "/login") return <SecureLogin onLeave={onLeave} />;
   if (p === "/enroll") return <SecureEnrollment />;
   if (["/locations", "/appointments", "/atms", "/maa"].includes(p) || p.startsWith("/auth/login")) {
@@ -51,11 +51,11 @@ function SecureEnrollment() {
       <main id="main-content" className="secure-login-main">
         <section className="secure-login-card" aria-labelledby="enroll-title">
           <h1 id="enroll-title">Enroll in Wells Fargo Online®</h1>
-          <p>Create fictional sign-on details for this preview. No real account or personal information is used.</p>
+          <p>Create a sign-on profile for this workspace. No real account or personal information is used.</p>
           <form onSubmit={enroll} className="secure-enrollment-form">
             <label className="secure-login-field"><span className="secure-login-label">Username</span><input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required /></label>
             <label className="secure-login-field"><span className="secure-login-label">Password</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required /></label>
-            <button type="submit" className="secure-login-submit" disabled={!username || !password}>Create demo account</button>
+            <button type="submit" className="secure-login-submit" disabled={!username || !password}>Create account</button>
           </form>
         </section>
       </main>

@@ -5,20 +5,20 @@ export function day(offset = 0, base = new Date()) {
 }
 
 export const PEOPLE = [
-  { id: "sarah", name: "Sarah Miller", detail: "Sample contact" },
-  { id: "alex", name: "Alex Chen", detail: "Sample contact" },
-  { id: "jordan", name: "Jordan Lee", detail: "Sample contact" },
+  { id: "sarah", name: "Sarah Miller", detail: "Contact" },
+  { id: "alex", name: "Alex Chen", detail: "Contact" },
+  { id: "jordan", name: "Jordan Lee", detail: "Contact" },
 ];
 export const WIRE_RECIPIENTS = [
   {
     id: "studio",
     name: "Cedar Design Studio",
-    detail: "Demo business account ending in 2048",
+    detail: "Business account ending in 2048",
   },
   {
     id: "orchard",
     name: "Orchard Property Group",
-    detail: "Demo business account ending in 7662",
+    detail: "Business account ending in 7662",
   },
 ];
 export const LINKED_SAMPLES = [
@@ -285,7 +285,7 @@ function execute(state, payment) {
   }
 }
 
-// Scheduled demo entries settle on the next visit, not through a payment network.
+// Scheduled entries settle on the next visit, not through a payment network.
 export function settleDue(state, today = day()) {
   let changed = false;
   for (let pass = 0; pass < 520; pass++) {
@@ -388,7 +388,7 @@ function validate(state, input, editingId, today) {
       ))
   )
     throw new DemoError(
-      "Choose one linked sample bank and one deposit account.",
+      "Choose one linked bank account and one deposit account.",
     );
   if (
     kind === "payment" &&
@@ -401,9 +401,9 @@ function validate(state, input, editingId, today) {
     toName = (kind === "person" ? PEOPLE : WIRE_RECIPIENTS).find(
       (p) => p.id === to,
     )?.name;
-    if (!toName) throw new DemoError("Choose a sample recipient.");
+    if (!toName) throw new DemoError("Choose a recipient.");
     if (kind === "person" && amount > 350000)
-      throw new DemoError("The demo limit is $3,500 per payment.");
+      throw new DemoError("The payment limit is $3,500 per payment.");
   }
   if (kind === "bill") {
     if (source.type !== "checking")
@@ -411,7 +411,7 @@ function validate(state, input, editingId, today) {
     const bill = state.bills.find((b) => b.id === to);
     if (!bill || bill.amount !== amount)
       throw new DemoError(
-        "Choose an outstanding sample bill and its amount due.",
+        "Choose an outstanding bill and its amount due.",
       );
     if (
       state.payments.some(
@@ -470,7 +470,7 @@ export function applyAction(original, command, today = day()) {
     }
     if (state.payments.length >= 1000)
       throw new DemoError(
-        "This demo workspace is full. Start a new demo to continue.",
+        "This workspace is full. Start a new workspace to continue.",
       );
     const details = validate(state, input, null, today);
     const record = {
@@ -510,7 +510,7 @@ export function applyAction(original, command, today = day()) {
   } else if (command.action === "link") {
     const sample = LINKED_SAMPLES.find((a) => a.id === input.id);
     if (!sample || state.accounts.some((a) => a.id === sample.id))
-      throw new DemoError("Choose an unlinked sample bank.");
+      throw new DemoError("Choose an unlinked bank account.");
     state.accounts.push({ ...sample });
   } else if (command.action === "preference") {
     const key = input.key;
@@ -521,7 +521,7 @@ export function applyAction(original, command, today = day()) {
         : typeof input.value === "boolean";
     if (!valueOk) throw new DemoError("Invalid preference.");
     state.preferences[key] = input.value;
-  } else throw new DemoError("Unknown demo action.", 400);
+  } else throw new DemoError("Unknown workspace action.", 400);
   if (
     state.preferences.paymentAlerts &&
     ["submit", "edit", "cancel"].includes(command.action)

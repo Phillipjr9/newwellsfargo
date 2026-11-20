@@ -47,30 +47,30 @@ const pages: Record<PaymentKind, { title: string; description: string }> = {
   transfer: {
     title: "Transfer money",
     description:
-      "Move money between your sample checking and savings accounts.",
+      "Move money between your checking and savings accounts.",
   },
   external: {
     title: "Bank-to-bank transfers",
-    description: "Practice moving money to or from a linked sample bank.",
+    description: "Move money to or from a linked bank account.",
   },
   person: {
     title: "Send with Zelle\u00ae",
-    description: "Try a person-to-person payment with a fictional recipient.",
+    description: "Send a person-to-person payment to a recipient.",
   },
   wire: {
     title: "Wire money",
     description:
-      "Explore a domestic wire with a preconfigured sample recipient.",
+      "Explore a domestic wire with a preconfigured recipient.",
   },
   bill: {
     title: "Pay bills",
     description:
-      "Choose a sample bill, pick a payment date, and review the details.",
+      "Choose a bill, pick a payment date, and review the details.",
   },
   payment: {
     title: "Pay a card or loan",
     description:
-      "Make a sample payment toward your credit card or mortgage balance.",
+      "Make a payment toward your credit card or mortgage balance.",
   },
   deposit: {
     title: "Mobile deposit",
@@ -176,7 +176,7 @@ function LinkSampleBank({
   }
   return (
     <Dialog
-      label="Link a sample bank"
+      label="Link a bank account"
       className="pb-detail-dialog"
       onClose={onClose}
     >
@@ -190,9 +190,9 @@ function LinkSampleBank({
       <span className="pb-soft-icon">
         <Landmark size={24} />
       </span>
-      <h2>Linked sample banks</h2>
+      <h2>Linked bank accounts</h2>
       <p className="pb-muted-copy">
-        Use a fictional bank from the list. No login or account numbers are
+        Use a bank account from the list. No login or account numbers are
         needed.
       </p>
       {state.accounts
@@ -206,7 +206,7 @@ function LinkSampleBank({
       {options.length ? (
         <form onSubmit={link} className="pb-form-body">
           <label className="pb-field">
-            Sample bank
+            Bank account
             <select value={id} onChange={(e) => setId(e.target.value)}>
               {options.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -217,7 +217,7 @@ function LinkSampleBank({
           </label>
           <ErrorMessage text={error} />
           <button className="pb-button pb-solid" disabled={busy}>
-            {busy ? "Linking..." : "Link sample bank"}
+            {busy ? "Linking..." : "Link bank account"}
           </button>
         </form>
       ) : (
@@ -310,7 +310,7 @@ export function MoneyPage({
     kind === "bill"
       ? "Payee"
       : ["wire", "person"].includes(kind)
-        ? "Sample recipient"
+        ? "Recipient"
         : "To account";
   function chooseFrom(id: string) {
     setFrom(id);
@@ -385,22 +385,22 @@ export function MoneyPage({
               <span className="pb-soft-icon">
                 <Landmark />
               </span>
-              <h2>Connect a sample bank</h2>
-              <p>Link a demo account to practice transferring between banks.</p>
+              <h2>Connect a bank account</h2>
+              <p>Link an account to transfer between banks.</p>
               <button
                 className="pb-button pb-solid"
                 onClick={() => setLinking(true)}
                 disabled={!ready}
               >
                 <Plus size={16} />
-                Link a sample bank
+                Link a bank account
               </button>
             </div>
           ) : !options.length ? (
             <div className="pb-state-message">
               <CircleCheck className="pb-success-icon" />
               <h2>You're all caught up</h2>
-              <p>There are no outstanding sample payments of this type.</p>
+              <p>There are no outstanding payments of this type.</p>
               <a className="pb-button" href="/portal/payments">
                 View payment activity
               </a>
@@ -414,7 +414,7 @@ export function MoneyPage({
                   : "Review scheduled payment"}
               </h2>
               <p className="pb-muted-copy">
-                Verify the amount and destination before updating your demo
+                Verify the amount and destination before updating your account
                 ledger.
               </p>
               <div className="pb-review-total">
@@ -439,7 +439,7 @@ export function MoneyPage({
                   <dd>{frequencyNames[frequency]}</dd>
                 </div>
                 <div>
-                  <dt>Demo fee</dt>
+                  <dt>Service fee</dt>
                   <dd>$0.00</dd>
                 </div>
               </dl>
@@ -458,7 +458,7 @@ export function MoneyPage({
                   onClick={submit}
                   disabled={busy || !ready}
                 >
-                  {busy ? "Saving..." : "Confirm demo payment"}
+                  {busy ? "Saving..." : "Confirm payment"}
                   <ArrowRight size={16} />
                 </button>
               </div>
@@ -511,7 +511,7 @@ export function MoneyPage({
                   onClick={() => setLinking(true)}
                 >
                   <Link2 size={15} />
-                  Manage linked sample banks
+                  Manage linked bank accounts
                 </button>
               )}
               <div className="pb-form-pair">
@@ -657,7 +657,7 @@ function EditPayment({
         )}
         {date === day() && (
           <p className="pb-muted-copy">
-            Saving today's date will post this sample payment immediately.
+            Saving today's date will post this payment immediately.
           </p>
         )}
         <ErrorMessage text={error} />
@@ -711,15 +711,15 @@ export function PaymentDetail({ state, id }: { state: Workspace; id: string }) {
               <History size={30} />
             )}
           </span>
-          <p className="pb-eyebrow">Demo confirmation</p>
+          <p className="pb-eyebrow">Payment confirmation</p>
           <h1>
             {isTransfer ? "Transfer" : "Payment"} {p.status}
           </h1>
           <p className="pb-muted-copy">
             {p.status === "completed"
-              ? "Your sample balances have been updated."
+              ? "Your account balances have been updated."
               : p.status === "scheduled"
-                ? "Your sample payment is on the calendar. No funds have moved yet."
+                ? "Your payment is on the calendar. No funds have moved yet."
                 : p.status === "cancelled"
                   ? "This payment will not be processed."
                   : p.reason}
@@ -745,13 +745,13 @@ export function PaymentDetail({ state, id }: { state: Workspace; id: string }) {
               <dd>{frequencyNames[p.frequency]}</dd>
             </div>
             <div>
-              <dt>Preview reference</dt>
+              <dt>Reference</dt>
               <dd>{p.id}</dd>
             </div>
           </dl>
           <p className="pb-simulation-note">
             <ShieldCheck size={16} />
-            Fictional activity. Not a bank payment confirmation.
+            Transaction record. Not a bank payment confirmation.
           </p>
           {p.status === "scheduled" && (
             <div className="pb-receipt-actions">
@@ -873,7 +873,7 @@ export function PaymentActivity({ state }: { state: Workspace }) {
           <div className="pb-empty">
             <History size={26} />
             <strong>No {filter === "all" ? "" : filter} payments yet</strong>
-            <p>New demo transfers appear here after you confirm them.</p>
+            <p>New transfers appear here after you confirm them.</p>
             <a className="pb-action-link" href="/portal/transfers">
               Make a transfer <ArrowRight size={15} />
             </a>
@@ -888,7 +888,7 @@ export function MissingPage() {
   return (
     <section className="pb-panel pb-state-message">
       <h1>Page not found</h1>
-      <p>This page or sample record is not in your workspace.</p>
+      <p>This page or account record is not in your workspace.</p>
       <a href="/portal" className="pb-button pb-solid">
         Back to account summary
       </a>

@@ -12,7 +12,7 @@ let workspaceKey = "";
 try {
   workspaceKey = sessionStorage.getItem(tabKey) ?? "";
 } catch {
-  /* Storage may be disabled in an embedded preview. */
+  /* Storage may be unavailable in an embedded browser. */
 }
 const workspaceHeaders = (): Record<string, string> =>
   workspaceKey ? { "X-Demo-Workspace": workspaceKey } : {};
@@ -81,7 +81,7 @@ export function refreshWorkspace() {
         ) {
           if (!response.ok)
             throw new Error(
-              "Your demo workspace is unavailable. Please refresh to try again.",
+              "Your workspace is unavailable. Please refresh to try again.",
             );
           const { state } = await response.json();
           if (!state?.demo || state.version !== 2)
@@ -97,7 +97,7 @@ export function refreshWorkspace() {
           return;
         }
         if (!response.ok && response.status !== 404)
-          throw new Error("The demo server is unavailable. Please try again.");
+          throw new Error("The workspace server is unavailable. Please try again.");
       }
       // A static export uses the same validated ledger as the server, in this browser only.
       publish({ state: localWorkspace(), ready: true, error: "", local: true });
@@ -108,7 +108,7 @@ export function refreshWorkspace() {
         error:
           e instanceof Error
             ? e.message
-            : "Couldn't load the demo. Please refresh.",
+            : "Couldn't load the workspace. Please refresh.",
       });
     }
   })().finally(() => {
@@ -120,7 +120,7 @@ export function refreshWorkspace() {
 export async function runCommand(command: Command) {
   if (!snapshot.ready)
     throw new Error(
-      "Wait for the demo workspace to finish loading, then try again.",
+      "Wait for the workspace to finish loading, then try again.",
     );
   if (snapshot.local) {
     const out = applyAction(localWorkspace(), command);
@@ -150,7 +150,7 @@ export async function exitWorkspace() {
       body: "{}",
     });
     if (!res.ok && res.status !== 409)
-      throw new Error("Could not end the demo. Please retry.");
+      throw new Error("Could not end the session. Please retry.");
   } else localStorage.removeItem(localKey);
   initialized = false;
   workspaceKey = "";

@@ -157,7 +157,7 @@ export function PortalHeader({
       <div className="pb-masthead">
         <div className="pb-wrap pb-mast-inner">
           <div className="pb-brand">
-            <a href="/portal" aria-label="Wells Fargo demo account overview">
+            <a href="/portal" aria-label="Wells Fargo account overview">
               <img src={wordmark} alt="Wells Fargo" />
             </a>
             <span className="pb-brand-rule" />
@@ -166,7 +166,7 @@ export function PortalHeader({
           <div className="pb-utilities">
             <span className="pb-demo">
               <span />
-              Demo workspace
+              Customer workspace
             </span>
             <a
               className="pb-inbox-btn"
@@ -189,7 +189,7 @@ export function PortalHeader({
               <div className="pb-dropdown pb-profile-menu">
                 <div className="pb-profile-lead">
                   <strong>{state.profile.name}</strong>
-                  <span>Fictional demo profile</span>
+                  <span>Customer profile</span>
                 </div>
                 {links([
                   {
@@ -201,7 +201,7 @@ export function PortalHeader({
                 ])}
                 <button onClick={leave} disabled={exiting}>
                   <LogOut size={17} />
-                  {exiting ? "Ending session..." : "Exit demo & sign out"}
+                  {exiting ? "Ending session..." : "Sign out"}
                 </button>
                 {exitError && <p role="alert">{exitError}</p>}
               </div>
@@ -330,8 +330,8 @@ export function PortalResourceFooter() {
               WebkitMaskImage: `url(${wordmark})`,
             }}
           />
-          <p>Online Banking Preview</p>
-          <small>Independent demo. Sample accounts only.</small>
+          <p>Online Banking</p>
+          <small>Customer accounts and transactions</small>
         </div>
         <div>
           <h2>Banking services</h2>

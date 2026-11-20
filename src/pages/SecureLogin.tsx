@@ -101,7 +101,7 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
             className="secure-one-click-demo"
             onClick={() => { signDemoIn("demo-user"); navigate("/portal"); }}
           >
-            One-click demo login
+            One-click sign in
           </button>
           <button
             type="button"

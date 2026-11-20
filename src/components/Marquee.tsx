@@ -13,7 +13,7 @@ function SignOnPreview() {
       <div className="signon-body">
         <h2 id="signon-title">{greeting}</h2>
         <p>Sign on to manage your accounts.</p>
-        <p id="signon-notice">Preview only. Sign on at wellsfargo.com.</p>
+        <p id="signon-notice">Sign on at wellsfargo.com.</p>
         <div className="signon-sample" aria-hidden="true">
           <div className="signon-line">Username</div>
           <div className="signon-line">Password <span>Show</span></div>

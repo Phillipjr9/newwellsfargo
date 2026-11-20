@@ -25,7 +25,7 @@ export default function SiteFooter({ onLeave, portal = false, children }: { onLe
             </li>
           ))}
         </ul>
-        {portal && <p className="pb-footer-disclaimer">This independent demo does not hold deposits or process real payments. Legal and social links open official resources. The disclosures below describe Wells Fargo products, not this demo.</p>}
+        {portal && <p className="pb-footer-disclaimer">Account activity, transfers, and payment tools are provided in this online banking workspace. Legal and social links open official resources.</p>}
         <div className="footer-investment">
           <p>Investment and Insurance Products are:</p>
           <ul>

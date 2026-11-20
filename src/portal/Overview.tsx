@@ -362,11 +362,11 @@ export function ActivityRows({
       </div>
       {detail && (
         <Dialog
-          label="Sample transaction details"
+          label="Transaction details"
           className="pb-detail-dialog"
           onClose={() => setDetail(null)}
         >
-          <p className="pb-eyebrow">SAMPLE TRANSACTION</p>
+          <p className="pb-eyebrow">TRANSACTION</p>
           <h2>{detail.description}</h2>
           <strong className="pb-receipt-amount">
             {state.preferences.hideBalances ? "••••" : money(detail.amount)}
@@ -388,7 +388,7 @@ export function ActivityRows({
             </div>
             <div>
               <dt>Status</dt>
-              <dd>Posted to demo ledger</dd>
+              <dd>Posted to account activity</dd>
             </div>
           </dl>
           <button
@@ -567,7 +567,7 @@ export default function Overview({
           </section>
           <div className="pb-last-updated">
             <LockKeyhole size={13} />
-            <span>Sample balances as of {dateLabel(day())}</span>
+            <span>Balances as of {dateLabel(day())}</span>
             <button onClick={refresh} disabled={refreshing}>
               <RotateCw size={13} className={refreshing ? "pb-spin" : ""} />
               {refreshing ? "Refreshing" : "Refresh"}

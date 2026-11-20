@@ -35,12 +35,12 @@ const server = createServer((req, res) =>
       res.end(req.method === "HEAD" ? undefined : body);
     } catch {
       res.writeHead(503);
-      res.end("Run npm run build before starting the demo.");
+      res.end("Run npm run build before starting the banking server.");
     }
   }))),
 );
 server.listen(
   Number(process.env.PORT || 3000),
   process.env.HOST || "0.0.0.0",
-  () => console.log(`Banking demo listening on port ${server.address().port}`),
+  () => console.log(`Wells Fargo Online Banking listening on port ${server.address().port}`),
 );

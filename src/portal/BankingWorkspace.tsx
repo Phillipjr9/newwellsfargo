@@ -38,9 +38,9 @@ export default function BankingWorkspace({
     const heading =
       document.querySelector("#portal-main h1")?.textContent ??
       "Account overview";
-    document.title = `${heading} | Online Banking Demo`;
+    document.title = `${heading} | Wells Fargo Online Banking`;
     return () => {
-      document.title = "Wells Fargo Homepage | Unofficial Preview";
+      document.title = "Wells Fargo | Homepage";
     };
   }, [path, ready]);
   let page;
@@ -54,7 +54,7 @@ export default function BankingWorkspace({
   else if (path.startsWith("/portal/payments/"))
     page =
       !ready && !error ? (
-        <p className="pb-loading">Loading sample payment...</p>
+        <p className="pb-loading">Loading payment…</p>
       ) : (
         <PaymentDetail
           key={key}
@@ -89,7 +89,7 @@ export default function BankingWorkspace({
         )}
         <div className="pb-page" key={path}>
           {!ready && !error ? (
-            <p className="pb-loading" role="status">Loading your demo workspace…</p>
+            <p className="pb-loading" role="status">Loading your workspace…</p>
           ) : (
             page
           )}

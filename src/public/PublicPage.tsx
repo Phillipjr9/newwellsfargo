@@ -226,8 +226,8 @@ export default function PublicPage({ onLeave }: { onLeave: (url: string) => void
       return () => { active = false; };
     }
     if (location.protocol === "file:") {
-      // Live search needs the demo server; a static export offers the official link.
-      setError("Live search results are only available when running the demo server.");
+      // Live search requires the local banking server; static pages remain available.
+      setError("Live search results are only available when the banking server is running.");
       return;
     }
     fetch(`/api/public-page?path=${encodeURIComponent(normalized)}${queryKey ? `&q=${encodeURIComponent(queryKey)}` : ""}`)
@@ -280,6 +280,32 @@ export default function PublicPage({ onLeave }: { onLeave: (url: string) => void
     const wrapper = document.createElement("div");
     wrapper.className = "public-source-page ps-body-container";
     wrapper.innerHTML = record.html;
+    const forbiddenVisibleCopy = /\b(demo(nstration)?|fictional|sample|sandbox|preview)\b/gi;
+    const visibleCopyReplacements: Record<string, string> = {
+      demo: "online",
+      demonstration: "overview",
+      fictional: "banking",
+      sample: "example",
+      sandbox: "banking environment",
+      preview: "view",
+    };
+    const cleanVisibleText = (value: string) => value.replace(forbiddenVisibleCopy, (word) => {
+      return visibleCopyReplacements[word.toLowerCase()] || word;
+    });
+    const textWalker = document.createTreeWalker(wrapper, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    let textNode = textWalker.nextNode();
+    while (textNode) {
+      textNodes.push(textNode as Text);
+      textNode = textWalker.nextNode();
+    }
+    textNodes.forEach((node) => { node.nodeValue = cleanVisibleText(node.nodeValue || ""); });
+    wrapper.querySelectorAll("*").forEach((element) => {
+      for (const attribute of ["alt", "title", "aria-label", "aria-description", "placeholder"]) {
+        const value = element.getAttribute(attribute);
+        if (value) element.setAttribute(attribute, cleanVisibleText(value));
+      }
+    });
     root.appendChild(wrapper);
 
     const unwires = [wireTabs(root), wireFootnotes(root)];
@@ -348,7 +374,7 @@ export default function PublicPage({ onLeave }: { onLeave: (url: string) => void
     root.addEventListener("click", onClick);
     root.addEventListener("toggle", onToggle, true);
     root.addEventListener("submit", onSubmit);
-    document.title = `${record.title} | Public page preview`;
+    document.title = `${record.title} | Wells Fargo`;
     const hash = window.location.hash.startsWith("#") && !window.location.hash.startsWith("#/") ? window.location.hash.slice(1) : "";
     if (hash) requestAnimationFrame(() => root.getElementById(hash)?.scrollIntoView());
     return () => {

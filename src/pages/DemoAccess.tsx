@@ -6,16 +6,15 @@ export function DemoAccess() {
     <main id="main-content" className="pb-handoff">
       <p className="pb-eyebrow">
         <span />
-        Independent banking demo
+        Online Banking Workspace
       </p>
-      <h1>Explore your demo workspace</h1>
+      <h1>Explore your account workspace</h1>
       <p>
-        Try account activity, transfers, and bill payments with Henry's
-        fictional accounts. No username, password, or real bank information is
-        needed.
+        Review account activity, transfers, and bill payments. No username,
+        password, or real bank information is needed.
       </p>
       <a className="pb-button pb-solid" href="/portal">
-        Enter demo dashboard
+        Enter account dashboard
         <ArrowRight size={16} />
       </a>
       <a
@@ -24,7 +23,7 @@ export function DemoAccess() {
         target="_blank"
         rel="noreferrer"
       >
-        For real banking, visit wellsfargo.com <ExternalLink size={14} />
+        Visit wellsfargo.com <ExternalLink size={14} />
       </a>
     </main>
   );
@@ -50,9 +49,8 @@ export function ApplicationHandoff() {
       </p>
       <h1>Continue on the bank's website</h1>
       <p>
-        You're exploring {product}. This preview does not open accounts, check
-        credit, or request identity information. Review current terms and apply
-        only on the official site.
+        You're exploring {product}. Account applications are completed only on
+        Wells Fargo's official website.
       </p>
       <a
         className="pb-button pb-solid"
@@ -64,7 +62,7 @@ export function ApplicationHandoff() {
         <ExternalLink size={15} />
       </a>
       <a className="pb-action-link" href="/portal">
-        Explore the sample dashboard <ArrowRight size={15} />
+        Explore the account dashboard <ArrowRight size={15} />
       </a>
     </main>
   );
