@@ -21,14 +21,16 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
   const [showPassword, setShowPassword] = useState(false);
   const [saveUsername, setSaveUsername] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [loginError, setLoginError] = useState("");
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    signDemoIn(username);
-    navigate("/portal");
+    setLoginError("");
+    try { await signDemoIn(username, password); navigate("/portal"); }
+    catch (error) { setLoginError(error instanceof Error ? error.message : "Sign-on details weren't recognized."); }
   }
 
   return (
@@ -89,17 +91,19 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
             </label>
             <p className="secure-login-save-copy">To help keep your account secure, save your username only on devices that aren't used by other people.</p>
 
+            {loginError && <p className="ad-login-error" role="alert">{loginError}</p>}
+
             <button type="submit" className="secure-login-submit" disabled={!username || !password}>Sign on</button>
           </form>
 
           <div className="secure-login-divider"><span>or</span></div>
-          <button type="button" className="secure-login-passkey" onClick={() => { signDemoIn(username || "demo-passkey"); navigate("/portal"); }}><PasskeyIcon />Use a passkey</button>
+          <button type="button" className="secure-login-passkey" onClick={async () => { try { await signDemoIn(username || "customer-passkey", password || "customer-password"); navigate("/portal"); } catch (error) { setLoginError(error instanceof Error ? error.message : "Sign-on failed."); } }}><PasskeyIcon />Use a passkey</button>
           <p className="secure-login-passkey-copy">Don't have one? Create a passkey after signing on and skip the password next time.</p>
 
           <button
             type="button"
             className="secure-one-click-demo"
-            onClick={() => { signDemoIn("demo-user"); navigate("/portal"); }}
+            onClick={async () => { try { await signDemoIn("customer", "customer-password"); navigate("/portal"); } catch (error) { setLoginError(error instanceof Error ? error.message : "Sign-on failed."); } }}
           >
             One-click sign in
           </button>

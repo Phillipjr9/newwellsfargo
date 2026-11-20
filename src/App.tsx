@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import favicon from "./assets/favicon.jpg";
 import Header from "./components/Header";
 import SiteFooter from "./components/SiteFooter";
 import ExternalLinkDialog from "./components/ExternalLinkDialog";
 import { RouterProvider, useRouter } from "./router/RouterContext";
-import { isDemoSignedIn, signDemoIn } from "./auth";
+import { checkDemoSession, isDemoSignedIn, signDemoIn } from "./auth";
 
 // The public product and help pages are rendered from the original public source.
 import HomePage from "./pages/HomePage";
@@ -19,9 +19,12 @@ import "./public/public-page.css";
 
 function AppRoutes({ onLeave }: { onLeave: (url: string) => void }) {
   const { path } = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
+  useEffect(() => { void checkDemoSession().finally(() => setAuthChecked(true)); }, [path]);
   const p = path.toLowerCase().replace(/\/+$/, "") || "/";
 
   if (/^\/portal(?:\/|$)/.test(normalizedPortalPath(p))) {
+    if (!authChecked) return null;
     if (!isDemoSignedIn()) return <SecureLogin onLeave={onLeave} />;
     return <BankingWorkspace onLeave={onLeave} />;
   }
@@ -41,9 +44,9 @@ function SecureEnrollment() {
   const { navigate } = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  function enroll(event: React.FormEvent) {
+  async function enroll(event: React.FormEvent) {
     event.preventDefault();
-    signDemoIn(username);
+    await signDemoIn(username, password);
     navigate("/portal");
   }
   return (

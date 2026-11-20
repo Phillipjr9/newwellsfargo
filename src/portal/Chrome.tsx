@@ -166,7 +166,7 @@ export function PortalHeader({
           <div className="pb-utilities">
             <span className="pb-demo">
               <span />
-              Customer workspace
+              Customer banking
             </span>
             <a
               className="pb-inbox-btn"

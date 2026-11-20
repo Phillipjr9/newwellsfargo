@@ -148,7 +148,7 @@ export function FargoSection({ onLeave }: { onLeave: OutsideLinkHandler }) {
             <img src={googleBadge} width="176" height="52" alt="Get it on Google Play" loading="lazy" />
           </a>
         </div>
-        <p>*Screen image is simulated</p>
+        <p>*Screen image shown for reference</p>
       </div>
     </section>
   );

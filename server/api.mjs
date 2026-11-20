@@ -6,21 +6,18 @@ import {
   existsSync,
   unlinkSync,
   readdirSync,
+  rmSync,
 } from "node:fs";
-import {
-  createHmac,
-  createHash,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { createHash, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   applyAction,
   createWorkspace,
   DemoError,
   day,
   settleDue,
+  validateDraft,
 } from "../shared/ledger.mjs";
 
 const directory =
@@ -31,11 +28,17 @@ const auditFile = join(directory, "admin-audit.ndjson");
 const adminFailures = new Map();
 const ADMIN_COOKIE = "banking_preview_admin";
 const ADMIN_SESSION_SECONDS = 60 * 60;
+const STAFF_COOKIE = "banking_preview_staff";
 
 const staffFile = join(directory, "admin-staff.json");
 const meFile = join(directory, "admin-root.json");
 const assignmentsFile = join(directory, "admin-assignments.json");
 const settingsFile = join(directory, "admin-settings.json");
+
+const customerSessionFile = join(directory, "customer-sessions.json");
+const adminEpochFile = join(directory, "admin-session-epoch.json");
+const CUSTOMER_COOKIE = "banking_customer";
+const CUSTOMER_SESSION_SECONDS = 60 * 60 * 8;
 
 const defaultRootIdentity = {
   id: "root",
@@ -55,24 +58,67 @@ function configuredAdminSecret() {
   return "administrator";
 }
 
-function signAdminSession(expiry, nonce) {
+function signAdminSession(expiry, nonce, epoch = adminEpoch()) {
   const secret = configuredAdminSecret();
   if (!secret) return null;
-  const payload = `${expiry}.${nonce}`;
+  const payload = `${expiry}.${nonce}.${epoch}`;
   const signature = createHmac("sha256", secret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 
+function staffRoleCapabilities(role) {
+  const capabilities = {
+    root: ["*"],
+    administrator: ["customers:*", "staff:*", "ledger:*", "audit:*", "backup:*", "operations:*"],
+    staff: ["customers:read", "customers:update", "ledger:read", "ledger:update", "messages:*", "disputes:*", "schedules:*", "payees:*"],
+    viewer: ["customers:read", "ledger:read", "audit:read", "schedules:read", "messages:read", "disputes:read", "payees:read"],
+  };
+  return capabilities[role] || [];
+}
+
+function hasCapability(actor, capability) {
+  if (actor.role === "root") return true;
+  return staffRoleCapabilities(actor.role).some((value) => value === "*" || value === capability || (value.endsWith(":*") && capability.startsWith(value.slice(0, -1))));
+}
+
+function requireAdminCapability(req, capability) {
+  if (!validAdminSession(req)) throw new DemoError("An administrator session is required.", 401);
+  // The root access code remains the compatibility identity. Staff identities are enforced when mapped sessions add staffActor metadata.
+  const actor = req.adminActor || rootIdentity();
+  if (!hasCapability(actor, capability)) throw new DemoError("The administrator role lacks this capability.", 403);
+  return actor;
+}
+
 function validAdminSession(req) {
-  const raw = (req.headers.cookie || "").match(
-    /(?:^|;\s*)banking_preview_admin=([^;]+)/,
-  )?.[1];
-  const [expiryText, nonce, signature, extra] = decodeURIComponent(raw || "").split(".");
-  if (!raw || extra || !/^\d+$/.test(expiryText || "") || !/^[a-f0-9]{32}$/.test(nonce || "")) return false;
-  const expected = signAdminSession(expiryText, nonce);
-  if (!expected || Number(expiryText) <= Math.floor(Date.now() / 1000)) return false;
-  const provided = Buffer.from(`${expiryText}.${nonce}.${signature || ""}`);
-  const wanted = Buffer.from(expected);
+  const rootRaw = readAdminCookie(req);
+  if (rootRaw) {
+    const decoded = decodeURIComponent(rootRaw);
+    const parts = decoded.split(".");
+    if (parts.length === 4) {
+      const [expiryText, nonce, epochText, signature] = parts;
+      if (/^\d+$/.test(expiryText) && /^\d+$/.test(epochText) && /^[a-f0-9]{32}$/.test(nonce) && Number(epochText) === adminEpoch()) {
+        const expected = signAdminSession(expiryText, nonce, epochText);
+        if (expected && Number(expiryText) > Math.floor(Date.now() / 1000)) {
+          const wanted = Buffer.from(expected), provided = Buffer.from(decoded);
+          if (provided.length === wanted.length && timingSafeEqual(provided, wanted)) return true;
+        }
+      }
+    }
+  }
+
+  const staffRaw = (req.headers.cookie || "").match(/(?:^|;\s*)banking_preview_staff=([^;]+)/)?.[1];
+  if (!staffRaw) return false;
+  const decoded = decodeURIComponent(staffRaw);
+  const parts = decoded.split(".");
+  if (parts.length !== 5) return false;
+  const [expiryText, nonce, epochText, staffId, signature] = parts;
+  if (!/^\d+$/.test(expiryText) || !/^\d+$/.test(epochText) || !/^[a-f0-9]{32}$/.test(nonce) || !/^[a-f0-9]+$/.test(staffId)) return false;
+  const staff = staffEntries().find(item => item.id === staffId && item.active);
+  if (!staff || !staff.passwordHash || !staff.passwordSalt) return false;
+  if (Number(expiryText) <= Math.floor(Date.now() / 1000)) return false;
+  const payload = `${expiryText}.${nonce}.${epochText}.${staffId}`;
+  const expected = `${payload}.${createHmac("sha256", staff.passwordHash).update(payload).digest("base64url")}`;
+  const wanted = Buffer.from(expected), provided = Buffer.from(decoded);
   return provided.length === wanted.length && timingSafeEqual(provided, wanted);
 }
 
@@ -102,11 +148,23 @@ async function readJsonBody(req, limit = 4096) {
 }
 
 function auditAdmin(action, workspace = "") {
+  const retention = Math.max(250, Math.min(Number(adminSettings().auditRetention || 2000), 5000));
   let entries = [];
   try { entries = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)); }
   catch { entries = []; }
-  entries.push({ at: new Date().toISOString(), actor: "super-admin", action, scope: "administrator actions", workspace: workspace ? `${workspace.slice(0, 8)}…` : null });
-  writeFileSync(auditFile, entries.slice(-2000).map(entry => JSON.stringify(entry)).join("\n") + "\n", { mode: 0o600 });
+  entries = entries.slice(-retention);
+  const previousHash = entries.length ? (entries.at(-1).hash || createHash("sha256").update(JSON.stringify(entries.at(-1))).digest("hex")) : "GENESIS";
+  const entry = {
+    at: new Date().toISOString(),
+    actor: "super-admin",
+    action,
+    scope: "administrator actions",
+    workspace: workspace ? `${workspace.slice(0, 8)}…` : null,
+    previousHash,
+  };
+  entry.hash = createHash("sha256").update(JSON.stringify(entry)).digest("hex");
+  entries.push(entry);
+  writeFileSync(auditFile, entries.slice(-retention).map(row => JSON.stringify(row)).join("\n") + "\n", { mode: 0o600 });
 }
 
 function safeWorkspaceSummary(id, state) {
@@ -229,10 +287,16 @@ async function publicPost(req) {
 export async function adminApi(req, res, next) {
   const path = (req.url || "/").split("?")[0];
   if (!path.startsWith("/api/admin/")) return next();
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Vary", "Cookie");
+  if (path.startsWith("/api/demo/")) return next();
+  const staffRaw = (req.headers.cookie || "").match(/(?:^|;\s*)banking_preview_staff=([^;]+)/)?.[1];
+  if (staffRaw) {
+    const staffMatch = decodeURIComponent(staffRaw).split(".");
+    if (staffMatch.length === 5) {
+      const staffId = staffMatch[3];
+      const staff = staffEntries().find(item => item.id === staffId && item.active);
+      if (staff) req.adminActor = staff;
+    }
+  }
   try {
     if (path === "/api/admin/session" && req.method === "GET") {
       res.end(JSON.stringify({
@@ -278,6 +342,46 @@ export async function adminApi(req, res, next) {
       res.end(JSON.stringify({ authenticated: false }));
       return;
     }
+    const isolatedWorkspace = /^\/api\/admin\/workspaces\/([a-f0-9]{48})(?:\/(reset))?$/.exec(path);
+    if (isolatedWorkspace) {
+      const [, isolatedId, isolatedAction] = isolatedWorkspace;
+      const isolatedFile = join(directory, `${isolatedId}.json`);
+      if (!existsSync(isolatedFile)) {
+        res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Workspace not found." }));
+        return;
+      }
+      if (req.method === "GET" && !isolatedAction) {
+        const state = JSON.parse(readFileSync(isolatedFile, "utf8"));
+        const body = JSON.stringify({ summary: summarizeWorkspace(isolatedId, state), accounts: [], recentPayments: [] });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+        res.end(body);
+        return;
+      }
+      if (req.method === "POST" && isolatedAction === "reset") {
+        requireSameOrigin(req);
+        if (!adminSettings().allowWorkspaceReset) throw new DemoError("Workspace reset is disabled.", 403);
+        const state = createWorkspace();
+        save(isolatedFile, state);
+        auditAdmin("demo_workspace_reset", isolatedId);
+        const body = JSON.stringify({ success: true, summary: summarizeWorkspace(isolatedId, state) });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+        res.end(body);
+        return;
+      }
+      if (req.method === "DELETE" && !isolatedAction) {
+        requireSameOrigin(req);
+        if (!adminSettings().allowWorkspaceDelete) throw new DemoError("Workspace deletion is disabled.", 403);
+        unlinkSync(isolatedFile);
+        auditAdmin("demo_workspace_removed", isolatedId);
+        const body = JSON.stringify({ success: true, id: isolatedId });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+        res.end(body);
+        return;
+      }
+      throw new DemoError("Method not allowed.", 405);
+    }
+
     if (req.method === "GET" && path === "/api/admin/overview") {
       const workspaces = demoWorkspaceFiles().map((name) => {
         const id = name.slice(0, 48);
@@ -330,6 +434,28 @@ export async function adminApi(req, res, next) {
       return;
     }
 
+    if (path === "/api/admin/staff/session" && req.method === "POST") {
+      requireSameOrigin(req);
+      const body = await readJsonBody(req, 4096);
+      const email = cleanText(body.email, 200).toLowerCase();
+      const password = typeof body.password === "string" ? body.password : "";
+      const staff = staffEntries().find(item => item.email === email && item.active);
+      if (!staff?.passwordHash || !staff.passwordSalt) throw new DemoError("Staff sign-on wasn't recognized.", 401);
+      const supplied = pbkdf2Sync(password, staff.passwordSalt, 120000, 32, "sha256").toString("hex");
+      const wanted = Buffer.from(staff.passwordHash, "hex");
+      const provided = Buffer.from(supplied, "hex");
+      if (provided.length !== wanted.length || !timingSafeEqual(provided, wanted)) throw new DemoError("Staff sign-on wasn't recognized.", 401);
+      const expiry = Math.floor(Date.now() / 1000) + ADMIN_SESSION_SECONDS;
+      const nonce = randomBytes(16).toString("hex");
+      const epoch = adminEpoch();
+      const payload = `${expiry}.${nonce}.${epoch}.${staff.id}`;
+      const cookie = `${payload}.${createHmac("sha256", staff.passwordHash).update(payload).digest("base64url")}`;
+      res.setHeader("Set-Cookie", `${STAFF_COOKIE}=${cookie}; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=${ADMIN_SESSION_SECONDS}${process.env.NODE_ENV === "production" || req.socket.encrypted ? "; Secure" : ""}`);
+      auditAdmin("staff_session_started");
+      res.end(JSON.stringify({ authenticated: true, role: staff.role, staffId: staff.id, expiresAt: new Date(expiry * 1000).toISOString() }));
+      return;
+    }
+
     if (path === "/api/admin/settings") {
       if (req.method === "GET") {
         res.end(JSON.stringify({ settings: adminSettings() }));
@@ -376,16 +502,44 @@ export async function adminApi(req, res, next) {
       const body = await readJsonBody(req, 20 * 1024 * 1024);
       if (body?.confirmation !== "RESTORE") throw new DemoError("Typed confirmation RESTORE is required.", 400);
       if (body?.version !== 1 || !Array.isArray(body?.workspaces) || typeof body?.settings !== "object") throw new DemoError("Invalid backup format.", 400);
-      for (const name of demoWorkspaceFiles()) unlinkSync(join(directory, name));
-      for (const item of body.workspaces) {
-        if (!item || !/^[a-f0-9]{48}$/.test(item.id || "")) continue;
-        if (!item.state || typeof item.state !== "object") continue;
-        save(join(directory, `${item.id}.json`), item.state);
+      const staged = join(directory, `.restore-${randomBytes(12).toString("hex")}`);
+      mkdirSync(staged, { recursive: true, mode: 0o700 });
+      const seen = new Set();
+      const movedIn = [];
+      try {
+        for (const item of body.workspaces) {
+          if (!item || !/^[a-f0-9]{48}$/.test(item.id || "") || seen.has(item.id)) throw new DemoError("Backup contains invalid or duplicate workspace identifiers.", 400);
+          seen.add(item.id);
+          validateLedgerInvariants(item.state);
+          writeFileSync(join(staged, `${item.id}.json`), JSON.stringify(item.state), { mode: 0o600 });
+        }
+        if (body.assignments && (typeof body.assignments !== "object" || Array.isArray(body.assignments))) throw new DemoError("Invalid assignment data.", 400);
+        for (const [workspaceId, staffId] of Object.entries(body.assignments || {})) {
+          if (!seen.has(workspaceId) || (staffId !== null && (!/^[a-f0-9]+$/.test(String(staffId)) || !staffEntries().some(staff => staff.id === String(staffId) && staff.active)))) throw new DemoError("Restore assignment references unavailable data.", 400);
+        }
+        for (const name of demoWorkspaceFiles()) {
+          renameSync(join(directory, name), join(staged, `old-${name}`));
+        }
+        for (const item of body.workspaces) {
+          renameSync(join(staged, `${item.id}.json`), join(directory, `${item.id}.json`));
+          movedIn.push(`${item.id}.json`);
+        }
+        saveAdminSettings({ maintenanceMode: false, allowWorkspaceReset: true, allowWorkspaceDelete: true, auditRetention: 2000, ...body.settings });
+        writeJsonFile(meFile, { ...defaultRootIdentity, ...(body.root && typeof body.root === "object" ? body.root : {}), id: "root", role: "root", active: true });
+        saveStaffEntries(Array.isArray(body.admins) ? body.admins : []);
+        saveAssignmentEntries(body.assignments || {});
+      } catch (error) {
+        for (const name of movedIn) {
+          if (existsSync(join(directory, name))) unlinkSync(join(directory, name));
+        }
+        for (const name of readdirSync(staged).filter(name => name.startsWith("old-") && /^old-[a-f0-9]{48}\.json$/.test(name))) {
+          const oldName = name.slice(4);
+          if (!existsSync(join(directory, oldName))) renameSync(join(staged, name), join(directory, oldName));
+        }
+        rmSync(staged, { recursive: true, force: true });
+        throw error;
       }
-      saveAdminSettings({ maintenanceMode: false, allowWorkspaceReset: true, allowWorkspaceDelete: true, auditRetention: 2000, ...body.settings });
-      writeJsonFile(meFile, { ...defaultRootIdentity, ...(body.root && typeof body.root === "object" ? body.root : {}), id: "root", role: "root", active: true });
-      saveStaffEntries(Array.isArray(body.admins) ? body.admins : []);
-      saveAssignmentEntries(body.assignments && typeof body.assignments === "object" ? body.assignments : {});
+      rmSync(staged, { recursive: true, force: true });
       auditAdmin("admin_backup_restored");
       res.end(JSON.stringify({ success: true, restoredWorkspaces: body.workspaces.length }));
       return;
@@ -430,8 +584,10 @@ export async function adminApi(req, res, next) {
     if (path === "/api/admin/me/revoke-all-sessions" && req.method === "POST") {
       requireSameOrigin(req);
       await readJsonBody(req, 4096);
+      const epoch = bumpAdminEpoch();
       auditAdmin("all_admin_sessions_revoked");
-      res.end(JSON.stringify({ success: true }));
+      res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=; HttpOnly; SameSite=Strict; Path=/api/admin; Max-Age=0${process.env.NODE_ENV === "production" || req.socket.encrypted ? "; Secure" : ""}`);
+      res.end(JSON.stringify({ success: true, epoch }));
       return;
     }
 
@@ -468,6 +624,7 @@ export async function adminApi(req, res, next) {
         const updated = { ...entries[index], ...validateStaff({ ...entries[index], ...body }), updatedAt: new Date().toISOString() };
         entries[index] = updated;
         saveStaffEntries(entries);
+        bumpAdminEpoch();
         auditAdmin("staff_identity_updated");
         res.end(JSON.stringify({ admin: updated }));
         return;
@@ -478,6 +635,7 @@ export async function adminApi(req, res, next) {
         const entries = staffEntries();
         if (!entries.some(item => item.id === id)) throw new DemoError("Staff identity not found.", 404);
         saveStaffEntries(entries.filter(item => item.id !== id));
+        bumpAdminEpoch();
         auditAdmin("staff_identity_deleted");
         res.end(JSON.stringify({ success: true }));
         return;
@@ -539,7 +697,14 @@ export async function adminApi(req, res, next) {
         if (action === "promote") state.promoted = body.promoted !== false;
         if (action === "suspend") { state.suspended = body.suspended !== false; state.status = state.suspended ? "suspended" : "active"; }
         if (action === "reset-password") state.passwordResetAt = new Date().toISOString();
-        if (action === "revoke-sessions") state.revokedSessionsAt = new Date().toISOString();
+        if (action === "revoke-sessions") {
+          state.customerSessionEpoch = Number(state.customerSessionEpoch || 0) + 1;
+          state.revokedSessionsAt = new Date().toISOString();
+        }
+        if (action === "impersonate") {
+          if (state.suspended || state.status === "suspended") throw new DemoError("A suspended customer cannot be impersonated.", 403);
+        }
+        validateLedgerInvariants(state);
         save(file, state); auditAdmin(`customer_${action.replaceAll("-", "_")}`, id);
         res.end(JSON.stringify(action === "impersonate" ? { success: true, workspaceId: id, impersonation: true } : { success: true, workspaceId: id, action })); return;
       }
@@ -559,9 +724,22 @@ export async function adminApi(req, res, next) {
     const instructionMatch = path.match(/^\/api\/admin\/(?:users\/([a-f0-9]{48})\/)?(?:scheduled(?:-instructions)?|instructions)(?:\/([a-f0-9-]+))?$/);
     if (instructionMatch) { const [, id, itemId] = instructionMatch;
       if (req.method === "GET") { const out = []; for (const name of demoWorkspaceFiles()) { const wid = name.slice(0,48); if (id && wid !== id) continue; const state = JSON.parse(readFileSync(join(directory,name),"utf8")); for (const payment of state.payments || []) if (payment.status === "scheduled") out.push({ workspaceId: wid, ...payment }); } res.end(JSON.stringify({ instructions: out, scheduled: out, count: out.length })); return; }
-      requireSameOrigin(req); const body = await readJsonBody(req, 4096); if (!id) throw new DemoError("Workspace id is required.", 400); const file = join(directory, `${id}.json`); if (!existsSync(file)) throw new DemoError("Customer workspace not found.", 404); const state = JSON.parse(readFileSync(file, "utf8"));
-      if (req.method === "POST") { const instruction = { id: randomBytes(12).toString("hex"), kind: cleanText(body.kind,40) || "transfer", amount: Number(body.amount || 0), date: cleanText(body.date,20) || day(), frequency: cleanText(body.frequency,40) || "once", status: "scheduled", toName: cleanText(body.toName,120) || "Scheduled instruction", created: new Date().toISOString() }; state.payments.unshift(instruction); save(file,state); auditAdmin("scheduled_instruction_created",id); res.end(JSON.stringify({ success:true, instruction })); return; }
-      const instruction = state.payments.find(item => item.id === itemId); if (!instruction) throw new DemoError("Scheduled instruction not found.",404); if (req.method === "DELETE") state.payments = state.payments.filter(item => item.id !== itemId); else { if (body.amount !== undefined) instruction.amount = Number(body.amount); if (body.date !== undefined) instruction.date = cleanText(body.date,20); if (body.status !== undefined) instruction.status = cleanText(body.status,40); } save(file,state); auditAdmin(req.method === "DELETE" ? "scheduled_instruction_deleted" : "scheduled_instruction_updated", id); res.end(JSON.stringify({ success:true, instruction })); return;
+      requireSameOrigin(req); const body = await readJsonBody(req, 4096); if (!id) throw new DemoError("Workspace id is required.", 400); const file = join(directory, `${id}.json`); if (!existsSync(file)) throw new DemoError("Customer workspace not found.", 404); const state = JSON.parse(readFileSync(file, "utf8")); validateLedgerInvariants(state);
+      if (req.method === "POST") {
+        const payload = { ...body, requestId: cleanText(body.requestId, 64) || `admin-${randomBytes(12).toString("hex")}` };
+        if (typeof payload.requestId !== "string" || !/^[a-zA-Z0-9-]{8,64}$/.test(payload.requestId)) throw new DemoError("Invalid scheduled instruction identifier.", 400);
+        const details = validateDraft(state, payload);
+        const instruction = { ...details, id: `DEMO-${randomBytes(8).toString("hex").toUpperCase()}`, requestId: payload.requestId, series: payload.requestId, status: "scheduled", created: new Date().toISOString() };
+        state.payments.unshift(instruction); validateLedgerInvariants(state); save(file,state); auditAdmin("scheduled_instruction_created",id); res.end(JSON.stringify({ success:true, instruction })); return;
+      }
+      const instruction = state.payments.find(item => item.id === itemId); if (!instruction) throw new DemoError("Scheduled instruction not found.",404);
+      if (req.method === "DELETE") instruction.status = "cancelled";
+      else {
+        const edited = { ...instruction, amount: body.amount === undefined ? instruction.amount : Number(body.amount), date: body.date === undefined ? instruction.date : cleanText(body.date,20), frequency: body.frequency === undefined ? instruction.frequency : cleanText(body.frequency,40) };
+        const details = validateDraft(state, edited);
+        Object.assign(instruction, details);
+      }
+      validateLedgerInvariants(state); save(file,state); auditAdmin(req.method === "DELETE" ? "scheduled_instruction_deleted" : "scheduled_instruction_updated", id); res.end(JSON.stringify({ success:true, instruction })); return;
     }
 
     // Disputes, support messages and notes
@@ -570,7 +748,19 @@ export async function adminApi(req, res, next) {
       if (req.method === "GET") { const out=[]; for(const name of demoWorkspaceFiles()){const wid=name.slice(0,48);if(id&&wid!==id)continue;const state=JSON.parse(readFileSync(join(directory,name),"utf8"));for(const dispute of state.disputes||[])out.push({workspaceId:wid,...dispute});}res.end(JSON.stringify({disputes:out,count:out.length}));return; }
       requireSameOrigin(req); if (!id) throw new DemoError("Workspace id is required.",400); const body=await readJsonBody(req,4096); const file=join(directory,`${id}.json`);if(!existsSync(file))throw new DemoError("Customer workspace not found.",404);const state=JSON.parse(readFileSync(file,"utf8"));state.disputes||=[];
       if (req.method === "POST") { const dispute={id:randomBytes(12).toString("hex"),transactionId:cleanText(body.transactionId,80),reason:cleanText(body.reason,200)||"Account dispute",status:"open",amount:Number(body.amount||0),openedAt:new Date().toISOString()};state.disputes.push(dispute);save(file,state);auditAdmin("dispute_opened",id);res.end(JSON.stringify({success:true,dispute}));return; }
-      const dispute=state.disputes.find(item=>item.id===itemId);if(!dispute)throw new DemoError("Dispute not found.",404);if(action=== "status"||body.status)dispute.status=cleanText(body.status,40)||dispute.status;if(action=== "refund"||body.refund){dispute.status="refunded";dispute.refundAmount=Number(body.amount||dispute.amount||0);dispute.refundedAt=new Date().toISOString();}save(file,state);auditAdmin(action?`dispute_${action}`:"dispute_updated",id);res.end(JSON.stringify({success:true,dispute}));return;
+      const dispute=state.disputes.find(item=>item.id===itemId);if(!dispute)throw new DemoError("Dispute not found.",404);if(action=== "status"||body.status)dispute.status=cleanText(body.status,40)||dispute.status;if(action=== "refund"||body.refund){
+        if (dispute.status === "refunded") throw new DemoError("This dispute refund was already applied.", 409);
+        const refundAmount=Number(body.amount||dispute.amount||0);
+        if (!Number.isSafeInteger(refundAmount)||refundAmount<=0) throw new DemoError("Refund amount is invalid.",400);
+        const sourceTx=state.transactions.find(tx=>tx.id===dispute.transactionId);
+        if (!sourceTx) throw new DemoError("Dispute transaction was not found.",404);
+        const account=state.accounts.find(a=>a.id===sourceTx.accountId);
+        if (!account) throw new DemoError("Dispute account was not found.",404);
+        account.balance=Number((account.balance+refundAmount).toFixed(2));
+        sourceTx.status="refund-reversed";
+        state.transactions.unshift({id:`refund-${dispute.id}`,accountId:account.id,date:day(),description:`Refund for disputed ${sourceTx.description}`,category:"Refund",amount:refundAmount,status:"posted",reference:dispute.id,disputeId:dispute.id});
+        dispute.status="refunded";dispute.refundAmount=refundAmount;dispute.refundedAt=new Date().toISOString();
+      }validateLedgerInvariants(state);save(file,state);auditAdmin(action?`dispute_${action}`:"dispute_updated",id);res.end(JSON.stringify({success:true,dispute}));return;
     }
 
     const messageMatch = path.match(/^\/api\/admin\/(?:users\/([a-f0-9]{48})\/)?messages$/);
@@ -582,7 +772,7 @@ export async function adminApi(req, res, next) {
     if (path === "/api/admin/support" || path === "/api/admin/support-contact") { const file=join(directory,"admin-support.json");
       if(req.method=== "GET")res.end(JSON.stringify({support:readJsonFile(file,{status:"open",banner:"",contact:{email:"",phone:""},notes:[]})}));else{requireSameOrigin(req);const body=await readJsonBody(req,4096);const support={status:cleanText(body.status,40)||"open",banner:cleanText(body.banner,500),contact:{email:cleanText(body.email||body?.contact?.email,200),phone:cleanText(body.phone||body?.contact?.phone,40)},notes:Array.isArray(body.notes)?body.notes.slice(-500):readJsonFile(file,{notes:[]}).notes||[]};writeJsonFile(file,support);auditAdmin("support_status_updated");res.end(JSON.stringify({success:true,support}));}return;
     }
-    if (path === "/api/admin/support/notes") { requireSameOrigin(req);const body=await readJsonBody(req,4096);const file=join(directory,"admin-support.json");const support=readJsonFile(file,{status:"open",banner:"",contact:{email:"",phone:""},notes:[]});support.notes||=[];const note={id:randomBytes(12).toString("hex"),body:cleanText(body.body,4000),createdAt:new Date().toISOString()};support.notes.push(note);writeJsonFile(file,support);auditAdmin("support_note_added");res.end(JSON.stringify({success:true,note}));return; }
+    if (path === "/api/admin/support/notes") { requireSameOrigin(req);const body=await readJsonBody(req,4096);const file=join(directory,"admin-support.json");const support=readJsonFile(file,{status:"open",banner:"",contact:{email:"",phone:""},notes:[]});support.notes||=[];const note={id:randomBytes(12).toString("hex"),body:cleanText(body.body,4000),createdAt:new Date().toISOString()};support.notes.push(note);writeJsonFile(file,support);auditAdmin("support_note_added");res.end(JSON.stringify({success:true,note}));}return;
     if (path === "/api/admin/saved-replies") { const file=join(directory,"admin-saved-replies.json");if(req.method=== "GET")res.end(JSON.stringify(readJsonFile(file,{replies:[]})));else{requireSameOrigin(req);const body=await readJsonBody(req,4096);const saved=readJsonFile(file,{replies:[]});saved.replies||=[];if(req.method!== "POST")throw new DemoError("Method not allowed.",405);const reply={id:randomBytes(12).toString("hex"),title:cleanText(body.title,120),body:cleanText(body.body,4000),createdAt:new Date().toISOString()};saved.replies.push(reply);writeJsonFile(file,saved);auditAdmin("saved_reply_created");res.end(JSON.stringify({success:true,reply}));}return; }
 
     // Audit integrity block and JSON proof export
@@ -626,17 +816,22 @@ export async function adminApi(req, res, next) {
         const body = await readJsonBody(req, 4096);
         if (collection === "accounts") {
           const accountId = randomBytes(12).toString("hex");
-          const account = { id: accountId, name: cleanText(body.name, 120) || "New Account", nickname: cleanText(body.nickname, 120), type: ["checking","savings","cd","credit-card","auto-loan","mortgage"].includes(body.type) ? body.type : "checking", last4: cleanText(body.last4, 4) || String(accountId).slice(-4), balance: Number(body.balance || 0), limit: Number(body.limit || 0), points: Number(body.points || 0), locked: Boolean(body.locked), hidden: Boolean(body.hidden), favorite: Boolean(body.favorite), primary: Boolean(body.primary), openingDate: cleanText(body.openingDate, 20) || day() };
-          state.accounts.push(account);
-          save(file, state); auditAdmin("account_created", id); res.end(JSON.stringify({ success: true, account })); return;
+          const balance = Number(body.balance || 0);
+          const limit = Number(body.limit || 0);
+          if (!Number.isSafeInteger(balance) || !Number.isSafeInteger(limit) || limit < 0) throw new DemoError("Invalid account values.", 400);
+          const account = { id: accountId, name: cleanText(body.name, 120) || "New Account", nickname: cleanText(body.nickname, 120), type: ["checking","savings","cd","credit-card","auto-loan","mortgage"].includes(body.type) ? body.type : "checking", last4: cleanText(body.last4, 4) || String(accountId).slice(-4), balance, limit, points: Number(body.points || 0), locked: Boolean(body.locked), hidden: Boolean(body.hidden), favorite: Boolean(body.favorite), primary: Boolean(body.primary), openingDate: cleanText(body.openingDate, 20) || day() };
+          if (!Number.isSafeInteger(account.points) || account.points < 0) throw new DemoError("Invalid account points.", 400);
+          state.accounts.push(account); validateLedgerInvariants(state); save(file, state); auditAdmin("account_created", id); res.end(JSON.stringify({ success: true, account })); return;
         }
         const account = (state.accounts || []).find(entry => entry.id === body.accountId);
         if (!account) throw new DemoError("Account not found.", 404);
         const amount = Number(body.amount);
-        if (!Number.isFinite(amount) || Math.abs(amount) > 10000000) throw new DemoError("Invalid transaction amount.", 400);
+        if (!Number.isSafeInteger(amount) || Math.abs(amount) > 10000000) throw new DemoError("Invalid transaction amount.", 400);
         const tx = { id: randomBytes(12).toString("hex"), accountId: account.id, amount, description: cleanText(body.description, 200) || "Admin adjustment", category: cleanText(body.category, 80) || "Adjustment", date: cleanText(body.date, 20) || day(), status: body.status === "pending" ? "pending" : "posted", simulated: true };
-        state.transactions.unshift(tx); account.balance = Number((account.balance + amount).toFixed(2));
-        save(file, state); auditAdmin("transaction_posted", id); res.end(JSON.stringify({ success: true, transaction: tx })); return;
+        const newBalance = account.balance + amount;
+        if (!Number.isSafeInteger(newBalance) || newBalance < 0) throw new DemoError("The account balance would be invalid.", 400);
+        state.transactions.unshift(tx); account.balance = newBalance;
+        validateLedgerInvariants(state); save(file, state); auditAdmin("transaction_posted", id); res.end(JSON.stringify({ success: true, transaction: tx })); return;
       }
       if ((req.method === "PUT" || req.method === "DELETE") && itemId) {
         if (collection === "accounts") {
@@ -667,10 +862,28 @@ export async function adminApi(req, res, next) {
       for (const name of demoWorkspaceFiles()) {
         const id = name.slice(0, 48); const file = join(directory, name); const state = JSON.parse(readFileSync(file, "utf8"));
         if (path.endsWith("process-scheduled")) {
-          for (const payment of state.payments || []) if (payment.status === "scheduled") { payment.status = "completed"; payment.completedAt = new Date().toISOString(); processed++; }
+          const before = state.transactions.length;
+          if (settleDue(state, day())) processed += state.transactions.length - before;
         } else {
-          for (const account of state.accounts || []) if (["savings","cd"].includes(account.type)) { account.balance = Number((account.balance + Math.max(0.01, account.balance * (account.apr || (account.type === "cd" ? 0.0425 : 0.0215)) / 12)).toFixed(2)); }
+          const period = day().slice(0, 7);
+          state.monthlyClosings ||= [];
+          if (!state.monthlyClosings.includes(period)) {
+            for (const account of state.accounts || []) {
+              if (!["savings", "cd"].includes(account.type)) continue;
+              const apr = Number(account.apr || (account.type === "cd" ? 0.0425 : 0.0215));
+              const interest = Math.max(1, Math.round(account.balance * apr / 12));
+              if (interest <= 0) continue;
+              const txId = `interest-${period}-${account.id}`;
+              if (!state.transactions.some(tx => tx.id === txId)) {
+                account.balance = Number((account.balance + interest).toFixed(2));
+                state.transactions.unshift({ id: txId, accountId: account.id, date: day(), description: "Monthly interest", category: "Interest", amount: interest, status: "posted", reference: `month-close-${period}` });
+                processed++;
+              }
+            }
+            state.monthlyClosings.push(period);
+          }
         }
+        validateLedgerInvariants(state);
         save(file, state);
       }
       auditAdmin(path.endsWith("process-scheduled") ? "scheduled_payments_processed" : "month_end_close");
@@ -678,42 +891,51 @@ export async function adminApi(req, res, next) {
       return;
     }
 
-    const match = path.match(/^\/api\/admin\/workspaces\/([a-f0-9]{48})(?:\/(reset))?$/);
+    const match = /^\/api\/admin\/workspaces\/([a-f0-9]{48})(?:\/(reset))?$/.exec(path);
+    if (match && req.method === "GET" && !match[2]) {
+      const [, id] = match;
+      const file = join(directory, `${id}.json`);
+      if (!existsSync(file)) {
+        res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Customer workspace not found." }));
+        return;
+      }
+      const state = JSON.parse(readFileSync(file, "utf8"));
+      const body = JSON.stringify({ summary: summarizeWorkspace(id, state), accounts: [], recentPayments: [] });
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+      res.end(body);
+      return;
+    }
     if (!match) throw new DemoError("Not found.", 404);
     const [, id, action] = match;
     const file = join(directory, `${id}.json`);
     if (!existsSync(file)) throw new DemoError("Customer workspace not found.", 404);
-    if (req.method === "GET" && !action) {
-      const state = JSON.parse(readFileSync(file, "utf8"));
-      res.end(JSON.stringify({
-        summary: summarizeWorkspace(id, state),
-        accounts: state.accounts.map(({ id, name, type, last4, balance, limit, points }) => ({ id, name, type, last4, balance, limit, points })),
-        recentPayments: state.payments.slice(0, 12).map(({ id, kind, status, amount, date, toName }) => ({ id, kind, status, amount, date, toName })),
-      }));
-      return;
-    }
+
     if (req.method === "POST" && action === "reset") {
       requireSameOrigin(req);
       if (!adminSettings().allowWorkspaceReset) throw new DemoError("Workspace reset is disabled.", 403);
       const state = createWorkspace();
       save(file, state);
       auditAdmin("demo_workspace_reset", id);
-      res.end(JSON.stringify({ success: true, summary: summarizeWorkspace(id, state) }));
+      const body = JSON.stringify({ success: true, summary: summarizeWorkspace(id, state) });
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+      res.end(body);
       return;
     }
     if (req.method === "DELETE" && !action) {
       requireSameOrigin(req);
       if (!adminSettings().allowWorkspaceDelete) throw new DemoError("Workspace deletion is disabled.", 403);
-      await publicPost(req);
       unlinkSync(file);
       auditAdmin("demo_workspace_removed", id);
-      res.end(JSON.stringify({ success: true, id }));
+      const body = JSON.stringify({ success: true, id });
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+      res.end(body);
       return;
     }
     throw new DemoError("Method not allowed.", 405);
   } catch (error) {
     res.statusCode = error instanceof DemoError ? error.code : 500;
-    res.end(JSON.stringify({ error: error instanceof DemoError ? error.message : "Admin data could not be loaded. Please try again." }));
+    res.end(JSON.stringify({ error: error instanceof DemoError ? error.message : "The change could not be saved. Please try again." }));
   }
 }
 
@@ -736,6 +958,8 @@ function getWorkspace(req, res, allowCreate = true) {
     const file = join(directory, `${id}.json`);
     if (existsSync(file)) {
       const state = JSON.parse(readFileSync(file, "utf8"));
+      if (state.suspended || state.status === "suspended") throw new DemoError("This customer workspace is suspended.", 403);
+      validateLedgerInvariants(state);
       if (settleDue(state)) save(file, state);
       res.setHeader("X-Demo-Workspace", id);
       return { file, state };
@@ -817,48 +1041,240 @@ function validateStaff(body) {
   if (!name) throw new DemoError("Staff name is required.", 400);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new DemoError("Staff email is invalid.", 400);
   if (role && !["root", "administrator", "staff", "viewer"].includes(role)) throw new DemoError("Staff role is invalid.", 400);
-  return { name, email, role: role || "staff", active: body?.active !== false };
+  const result = { name, email, role: role || "staff", active: body?.active !== false };
+  if (typeof body?.password === "string" && body.password.length >= 10) {
+    const passwordSalt = randomBytes(16).toString("hex");
+    result.passwordSalt = passwordSalt;
+    result.passwordHash = pbkdf2Sync(body.password, passwordSalt, 120000, 32, "sha256").toString("hex");
+  } else if (body?.password !== undefined) throw new DemoError("Staff password must contain at least 10 characters.", 400);
+  return result;
+}
+
+function adminEpoch() {
+  const value = readJsonFile(adminEpochFile, { epoch: 0 });
+  return Number.isInteger(value?.epoch) ? value.epoch : 0;
+}
+
+function bumpAdminEpoch() {
+  const epoch = adminEpoch() + 1;
+  writeJsonFile(adminEpochFile, { epoch, updatedAt: new Date().toISOString() });
+  return epoch;
+}
+
+function customerSessionSecret() {
+  if (process.env.DEMO_CUSTOMER_TOKEN) return process.env.DEMO_CUSTOMER_TOKEN;
+  if (process.env.NODE_ENV === "production") return null;
+  return "banking-online-session";
+}
+
+function signCustomerSession(expiry, nonce, workspaceId, epoch) {
+  const secret = customerSessionSecret();
+  if (!secret) return null;
+  const payload = `${expiry}.${nonce}.${workspaceId}.${epoch}`;
+  return `${payload}.${createHmac("sha256", secret).update(payload).digest("base64url")}`;
+}
+
+function validCustomerSession(req) {
+  const raw = (req.headers.cookie || "").match(/(?:^|;\s*)banking_customer=([^;]+)/)?.[1];
+  const decoded = decodeURIComponent(raw || "");
+  const parts = decoded.split(".");
+  if (parts.length !== 5) return null;
+  const [expiryText, nonce, workspaceId, epochText, signature] = parts;
+  if (!/^\d+$/.test(expiryText) || !/^\d+$/.test(epochText) || !/^[a-f0-9]{32}$/.test(nonce) || !/^[a-f0-9]{48}$/.test(workspaceId)) return null;
+  const expiry = Number(expiryText);
+  if (expiry <= Math.floor(Date.now() / 1000)) return null;
+  const expected = signCustomerSession(expiryText, nonce, workspaceId, epochText);
+  if (!expected) return null;
+  const supplied = Buffer.from(decoded);
+  const wanted = Buffer.from(expected);
+  if (supplied.length !== wanted.length || !timingSafeEqual(supplied, wanted)) return null;
+  const file = join(directory, `${workspaceId}.json`);
+  if (!existsSync(file)) return null;
+  const state = JSON.parse(readFileSync(file, "utf8"));
+  if (state.suspended || state.status === "suspended") return null;
+  if (Number(state.customerSessionEpoch || 0) !== Number(epochText)) return null;
+  return { workspaceId, state, file };
+}
+
+function validateLedgerInvariants(state) {
+  if (!state || typeof state !== "object") throw new DemoError("Invalid workspace ledger.", 400);
+  if (!Array.isArray(state.accounts) || !Array.isArray(state.transactions) || !Array.isArray(state.payments))
+    throw new DemoError("Workspace ledger collections are incomplete.", 400);
+  const accountIds = new Set();
+  for (const account of state.accounts) {
+    if (!account?.id || !/^[a-zA-Z0-9_-]{1,80}$/.test(account.id)) throw new DemoError("Invalid account identifier.", 400);
+    if (accountIds.has(account.id)) throw new DemoError("Duplicate account identifier.", 409);
+    accountIds.add(account.id);
+    const balance = Number(account.balance);
+    if (!Number.isSafeInteger(balance)) throw new DemoError("Invalid account balance.", 400);
+  }
+  const transactionIds = new Set();
+  for (const tx of state.transactions) {
+    if (!tx?.id) throw new DemoError("Transaction identifier is missing.", 400);
+    if (transactionIds.has(tx.id)) throw new DemoError("Duplicate transaction identifier.", 409);
+    transactionIds.add(tx.id);
+    if (!accountIds.has(tx.accountId)) throw new DemoError("Transaction references an unknown account.", 409);
+    if (!Number.isSafeInteger(Number(tx.amount))) throw new DemoError("Invalid transaction amount.", 400);
+  }
+  for (const payment of state.payments) {
+    if (!payment?.id || !payment?.kind || !["once", "weekly", "monthly"].includes(payment.frequency || "once")) throw new DemoError("Invalid scheduled instruction.", 400);
+    if (!Number.isSafeInteger(Number(payment.amount)) || Number(payment.amount) < 1) throw new DemoError("Invalid scheduled instruction amount.", 400);
+    if (typeof payment.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(payment.date)) throw new DemoError("Invalid scheduled instruction date.", 400);
+    if (payment?.from && !accountIds.has(payment.from)) throw new DemoError("Scheduled instruction references an unknown source account.", 409);
+    if (payment?.to && payment.kind !== "person" && payment.kind !== "wire" && payment.kind !== "bill" && !accountIds.has(payment.to)) throw new DemoError("Scheduled instruction references an unknown destination.", 409);
+  }
+  return true;
+}
+
+function revokeCustomerSessions(state) {
+  state.customerSessionEpoch = Number(state.customerSessionEpoch || 0) + 1;
+  state.revokedSessionsAt = new Date().toISOString();
+  writeJsonFile(customerSessionFile, {
+
+    workspaceId: state.id || null,
+    revokedSessionsAt: state.revokedSessionsAt,
+    epoch: state.customerSessionEpoch,
+  });
 }
 
 export async function demoApi(req, res, next) {
   const path = (req.url || "/").split("?")[0];
-  if (!path.startsWith("/api/demo/")) return next();
+   if (!path.startsWith("/api/demo/")) return next();
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   try {
-    if (path === "/api/demo/workspace" && req.method === "GET") {
-      res.end(JSON.stringify({ state: getWorkspace(req, res).state }));
+    if (path === "/api/demo/session" && req.method === "GET") {
+      const session = validCustomerSession(req);
+      res.end(JSON.stringify({ authenticated: Boolean(session), workspaceId: session?.workspaceId || null }));
       return;
     }
-    if (req.method !== "POST" || !["/api/demo/action", "/api/demo/exit"].includes(path))
-      throw new DemoError("Not found.", 404);
-    if (req.headers["sec-fetch-site"] === "cross-site")
-      throw new DemoError("Cross-site requests are not allowed.", 403);
-    if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host)
-      throw new DemoError("Origin mismatch.", 403);
-    if (!req.headers["content-type"]?.startsWith("application/json"))
-      throw new DemoError("Use JSON for account operations.", 415);
-    if (path === "/api/demo/exit") {
-      const { file } = getWorkspace(req, res, false);
-      unlinkSync(file);
+    if (path === "/api/demo/session" && req.method === "POST") {
+      if (req.headers["sec-fetch-site"] === "cross-site") throw new DemoError("Cross-site requests are not allowed.", 403);
+      if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) throw new DemoError("Origin mismatch.", 403);
+      if (!req.headers["content-type"]?.startsWith("application/json")) throw new DemoError("Use JSON for sign-on.", 415);
+      const body = await readJsonBody(req, 4096);
+      const username = cleanText(body.username, 120);
+      if (!username) throw new DemoError("Username is required.", 400);
+      const password = typeof body.password === "string" ? body.password : "";
+      const secret = process.env.DEMO_CUSTOMER_PASSWORD || "customer-password";
+      if (process.env.NODE_ENV === "production" && !process.env.DEMO_CUSTOMER_PASSWORD) throw new DemoError("Customer sign-on is not configured.", 503);
+      if (password !== secret) throw new DemoError("Sign-on details weren't recognized.", 401);
+      let session = validCustomerSession(req);
+      if (!session) {
+        const token = randomBytes(24).toString("hex");
+        const file = join(directory, `${token}.json`);
+        const state = createWorkspace();
+        state.profile = { ...state.profile, name: username, email: "" };
+        state.customerSessionEpoch = 1;
+        save(file, state);
+        session = { workspaceId: token, state, file };
+      }
+      const expiry = Math.floor(Date.now() / 1000) + CUSTOMER_SESSION_SECONDS;
+      const cookie = signCustomerSession(expiry, randomBytes(16).toString("hex"), session.workspaceId, session.state.customerSessionEpoch || 1);
+      res.setHeader("Set-Cookie", `${CUSTOMER_COOKIE}=${cookie}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${CUSTOMER_SESSION_SECONDS}${process.env.NODE_ENV === "production" || req.socket.encrypted ? "; Secure" : ""}`);
+      res.end(JSON.stringify({ authenticated: true, workspaceId: session.workspaceId, expiresAt: new Date(expiry * 1000).toISOString() }));
+      return;
+    }
+    if (path === "/api/demo/session" && req.method === "DELETE") {
+      const session = validCustomerSession(req);
+      if (!session) throw new DemoError("Not authenticated.", 401);
+      revokeCustomerSessions(session.state);
+      res.setHeader("Set-Cookie", `${CUSTOMER_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${process.env.NODE_ENV === "production" || req.socket.encrypted ? "; Secure" : ""}`);
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+    if (path === "/api/demo/workspace" && req.method === "GET") {
+      const customerSession = validCustomerSession(req);
+      if (customerSession) {
+        res.setHeader("X-Demo-Workspace", customerSession.workspaceId);
+        const state = customerSession.state;
+        res.end(JSON.stringify({ state, workspaceId: customerSession.workspaceId, status: state.status || "active", suspended: Boolean(state.suspended), profile: state.profile || null }));
+        return;
+      }
+      const result = getWorkspace(req, res);
+      const id = result.file ? result.file.slice(result.file.lastIndexOf("/") + 1, -5) : null;
+      if (id) res.setHeader("X-Demo-Workspace", id);
+      res.end(JSON.stringify({ state: result.state, workspaceId: id || result.state.id, status: result.state.status || "active", suspended: Boolean(result.state.suspended), profile: result.state.profile || null }));
+      return;
+    }
+    if (path === "/api/demo/workspace" && req.method === "POST") {
+      const { state } = getWorkspace(req, res, false);
+      const body = await readJsonBody(req, 4096);
+      const name = cleanText(body?.name, 120);
+      const email = cleanText(body?.email, 200).toLowerCase();
+      if (name && email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new DemoError("Email is invalid.", 400);
+      state.profile = { name: name || state.profile?.name, email };
+      state.status = "active";
+      state.suspended = false;
+      save(state.file, state);
+      res.end(JSON.stringify({ success: true, profile: state.profile }));
+      return;
+    }
+    if (path === "/api/demo/workspace" && req.method === "DELETE") {
+      const { state } = getWorkspace(req, res);
+      save(state.file, createWorkspace());
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+    if (path === "/api/demo/transaction" && req.method === "POST") {
+      const { state } = getWorkspace(req, res);
+      const body = await readJsonBody(req, 4096);
+      const amount = Number(body.amount);
+      if (!Number.isFinite(amount) || Math.abs(amount) > 10000000) throw new DemoError("Invalid transaction amount.", 400);
+      const tx = { id: randomBytes(12).toString("hex"), accountId: body.accountId, amount, description: cleanText(body.description, 200) || "Account transaction", category: cleanText(body.category, 80) || "Misc", date: cleanText(body.date, 20) || day(), status: "posted", simulated: true };
+      state.transactions.unshift(tx);
+      const account = state.accounts.find(a => a.id === body.accountId);
+      if (account) account.balance = Number((account.balance + amount).toFixed(2));
+      save(state.file, state);
+      res.end(JSON.stringify({ success: true, transaction: tx }));
+      return;
+    }
+    if (path === "/api/demo/transaction" && req.method === "DELETE") {
+      const { file, state } = getWorkspace(req, res);
+      const body = await readJsonBody(req, 4096);
+      const tx = state.transactions.find(t => t.id === body.id);
+      if (!tx) throw new DemoError("Transaction not found.", 404);
+      const account = state.accounts.find(a => a.id === tx.accountId);
+      if (account) account.balance = Number((account.balance - Number(tx.amount || 0)).toFixed(2));
+      state.transactions = state.transactions.filter(t => t.id !== body.id);
+      validateLedgerInvariants(state);
+      save(file, state);
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+    if (path === "/api/demo/action" && req.method === "POST") {
+      if (req.headers["sec-fetch-site"] === "cross-site") throw new DemoError("Cross-site requests are not allowed.", 403);if (req.headers.origin) {
+        const originHost = new URL(req.headers.origin).host;
+        if (originHost !== req.headers.host) throw new DemoError("Origin mismatch.", 403);
+      }
+      if (!req.headers["content-type"]?.startsWith("application/json")) throw new DemoError("Use JSON for account operations.", 415);
+      const { file, state } = getWorkspace(req, res, false);
+      validateLedgerInvariants(state);
+      const body = await readJsonBody(req, 4096);
+      const output = applyAction(state, body);
+      validateLedgerInvariants(output.state);
+      save(file, output.state);
+      res.end(JSON.stringify(output));
+      return;
+    }
+    if (path === "/api/demo/exit" && req.method === "POST") {
+      let legacy = null;
+      try { legacy = getWorkspace(req, res, false); } catch {}
+      if (legacy?.file && existsSync(legacy.file)) unlinkSync(legacy.file);
+      const session = validCustomerSession(req);
+      if (session) {
+        session.state.customerSessionEpoch = Number(session.state.customerSessionEpoch || 0) + 1;
+        session.state.revokedSessionsAt = new Date().toISOString();
+        save(session.file, session.state);
+      }
       res.removeHeader("X-Demo-Workspace");
+      res.setHeader("Set-Cookie", `${CUSTOMER_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${process.env.NODE_ENV === "production" || req.socket.encrypted ? "; Secure" : ""}`);
       res.setHeader("Set-Cookie", "banking_demo=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
       res.end(JSON.stringify({ success: true }));
       return;
     }
-    let body = "";
-    for await (const part of req) {
-      body += part;
-      if (Buffer.byteLength(body) > 4096) throw new DemoError("Request too large.", 413);
-    }
-    let command;
-    try { command = JSON.parse(body); }
-    catch { throw new DemoError("Invalid JSON.", 400); }
-    const { file, state } = getWorkspace(req, res, false);
-    const output = applyAction(state, command);
-    save(file, output.state);
-    res.end(JSON.stringify(output));
+    throw new DemoError("Not found.", 404);
   } catch (error) {
     res.statusCode = error instanceof DemoError ? error.code : 500;
     res.end(JSON.stringify({ error: error instanceof DemoError ? error.message : "The change could not be saved. Please try again." }));
