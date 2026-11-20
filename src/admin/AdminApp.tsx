@@ -143,6 +143,19 @@ function Login({ hint, onLogin }: { hint?: string | null; onLogin: () => void })
     catch (e) { setError(e instanceof Error ? e.message : "Admin access unavailable."); }
     finally { setBusy(false); }
   }
+  async function quickLogin() {
+    setBusy(true);
+    setError("");
+    try {
+      const quickToken = hint || "";
+      await api("session", { method: "POST", body: JSON.stringify({ token: quickToken }) });
+      onLogin();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Admin access unavailable.");
+    } finally {
+      setBusy(false);
+    }
+  }
   return <main className="ad-login-screen">
     <section className="ad-login-card">
       <div className="ad-login-brand"><img src={wordmark} alt="Wells Fargo"/><span>Demo administration</span></div>
@@ -155,6 +168,7 @@ function Login({ hint, onLogin }: { hint?: string | null; onLogin: () => void })
         {error && <p className="ad-login-error" role="alert">{error}</p>}
         <button className="ad-primary-btn" disabled={busy}>{busy ? "Verifying…" : "Open admin console"}<ArrowRight size={16}/></button>
       </form>
+      {hint && <button type="button" className="ad-primary-btn ad-one-click-admin" disabled={busy} onClick={quickLogin}>{busy ? "Opening…" : "One-click super admin"}<KeyRound size={16}/></button>}
       {hint && <p className="ad-demo-hint">Local preview access code: <code>{hint}</code></p>}
       {!hint && <p className="ad-demo-hint">Set <code>DEMO_ADMIN_TOKEN</code> on the server to enable admin access.</p>}
       <p className="ad-login-foot"><ShieldCheck size={15}/> Activity is limited to fictional demo workspaces.</p>

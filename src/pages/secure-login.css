@@ -42,6 +42,25 @@
 .secure-login-passkey-copy { max-width: 324px; margin: 10px auto 26px; color: var(--color-wf-gray); font-size: 13px; line-height: 18px; }
 .secure-login-forgot { display: inline-flex; align-items: center; gap: 8px; color: var(--color-wf-link); font-size: 15px; }
 .secure-login-forgot span { font-size: 20px; }
+.secure-one-click-demo,
+.secure-one-click-admin {
+  width: 324px;
+  max-width: 100%;
+  height: 42px;
+  display: block;
+  margin: 8px auto 0;
+  border-radius: 22px;
+  border: 1.5px solid #3b3331;
+  background: #fff;
+  color: #3b3331;
+  font-size: 15px;
+  font-weight: 600;
+}
+.secure-one-click-demo:hover,
+.secure-one-click-admin:hover { background: #f4f0ed; }
+.secure-one-click-demo { margin-top: 18px; }
+.secure-one-click-admin { color: #5a469b; border-color: #5a469b; }
+.secure-one-click-admin + .secure-login-forgot { margin-top: 18px; }
 
 @media (max-width: 767px) {
   .secure-login-page { background: #fff; }

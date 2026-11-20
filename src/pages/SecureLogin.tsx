@@ -96,6 +96,21 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
           <button type="button" className="secure-login-passkey" onClick={() => { signDemoIn(username || "demo-passkey"); navigate("/portal"); }}><PasskeyIcon />Use a passkey</button>
           <p className="secure-login-passkey-copy">Don't have one? Create a passkey after signing on and skip the password next time.</p>
 
+          <button
+            type="button"
+            className="secure-one-click-demo"
+            onClick={() => { signDemoIn("demo-user"); navigate("/portal"); }}
+          >
+            One-click demo login
+          </button>
+          <button
+            type="button"
+            className="secure-one-click-admin"
+            onClick={() => navigate("/admin")}
+          >
+            Super admin login
+          </button>
+
           <a className="secure-login-forgot" href="https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/"); }}><span aria-hidden="true">→</span> Forgot username or password?</a>
         </section>
       </main>
