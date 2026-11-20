@@ -79,7 +79,9 @@ test("super-admin API protects, summarizes, audits and resets only demo workspac
     assert.equal((await (await fetch(`${origin}/api/admin/session`)).json()).adminEnabled, false);
     const productionSecret = "replace-with-a-unique-32-character-production-admin-secret";
     process.env.DEMO_ADMIN_TOKEN = productionSecret;
-    const productionLogin = await fetch(`${origin}/api/admin/session`, { method: "POST", headers: json, body: JSON.stringify({ token: productionSecret }) });
+    process.env.DEMO_ADMIN_EMAIL = "root@example.test";
+    process.env.DEMO_ADMIN_PASSWORD = "Production-Admin-Password-123";
+    const productionLogin = await fetch(`${origin}/api/admin/session`, { method: "POST", headers: json, body: JSON.stringify({ email: "root@example.test", password: "Production-Admin-Password-123", token: productionSecret }) });
     assert.equal(productionLogin.status, 200);
     assert.match(productionLogin.headers.get("set-cookie"), /; Secure/);
   } finally {

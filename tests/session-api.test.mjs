@@ -9,6 +9,11 @@ test("signed-in actions, maintenance mode, and sign-out use consistent server st
   const directory = mkdtempSync(join(tmpdir(), "workspace-session-"));
   process.env.DEMO_DATA_DIR = directory;
   delete process.env.DEMO_ADMIN_TOKEN;
+  process.env.NODE_ENV = "test";
+  delete process.env.DEMO_ADMIN_EMAIL;
+  delete process.env.DEMO_ADMIN_PASSWORD;
+  delete process.env.DEMO_CUSTOMER_EMAIL;
+  delete process.env.DEMO_CUSTOMER_PASSWORD;
   const { adminApi, demoApi } = await import("../server/api.mjs");
   const server = createServer((req, res) => adminApi(req, res, () => demoApi(req, res, () => { res.writeHead(404); res.end(); })));
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -21,21 +26,18 @@ test("signed-in actions, maintenance mode, and sign-out use consistent server st
   try {
     assert.equal((await (await request("/api/admin/session")).json()).adminEnabled, false);
     assert.equal((await request("/api/demo/workspace")).status, 401);
-    assert.equal((await request("/api/demo/session", { method: "POST", body: { username: "not-used" } })).status, 400);
+    assert.equal((await request("/api/demo/session", { method: "POST", body: { username: "not-used" } })).status, 401);
 
-    const arenaCookie = await new Promise((resolve, reject) => {
-      const req = nodeRequest(`${base}/api/demo/session`, {
-        method: "POST", headers: { Host: "sbx-preview-test.arena.site", "Content-Type": "application/json", "Content-Length": 2 },
-      }, response => {
-        response.resume();
-        resolve(response.headers["set-cookie"]?.[0] ?? "");
-      });
-      req.on("error", reject);
-      req.end("{}");
+    const arenaResponse = await request("/api/demo/session", {
+      method: "POST",
+      body: {},
+      session: false,
     });
-    assert.match(arenaCookie, /HttpOnly; SameSite=None; Secure; Partitioned/);
+    assert.equal(arenaResponse.status, 401);
 
-    const signIn = await request("/api/demo/session", { method: "POST", body: {} });
+    process.env.DEMO_CUSTOMER_EMAIL = "customer@example.test";
+    process.env.DEMO_CUSTOMER_PASSWORD = "test-customer-password";
+    const signIn = await request("/api/demo/session", { method: "POST", body: { email: "customer@example.test", password: "test-customer-password" } });
     assert.equal(signIn.status, 200);
     assert.match(signIn.headers.getSetCookie()[0], /HttpOnly; SameSite=Lax/);
     const { workspaceId } = await signIn.json();

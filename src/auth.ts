@@ -26,32 +26,21 @@ export async function checkDemoSession(signal?: AbortSignal, cookieOnly = false)
   return authenticated;
 }
 
-async function signInRequest(path: string, credentials: RequestCredentials) {
+async function signInRequest(path: string, credentials: RequestCredentials, body: Record<string, string> = {}) {
   const response = await fetch(path, {
-    method: "POST", credentials, headers: { "Content-Type": "application/json" }, body: "{}",
+    method: "POST", credentials, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     signal: AbortSignal.timeout(10000),
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.authenticated !== true) throw new Error(body.error || "Online banking is unavailable. Please try again.");
-  return body;
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.authenticated !== true) throw new Error(result.error || "Online banking is unavailable. Please try again.");
+  return result;
 }
 
-export async function signDemoIn() {
-  await signInRequest("/api/demo/session", "same-origin");
+export async function signDemoIn(email: string, password: string) {
+  await signInRequest("/api/demo/session", "same-origin", { email, password });
   if (await checkDemoSession(AbortSignal.timeout(10000), true)) {
     clearPreviewSession();
     return;
   }
-  if (!/^(?:sbx-[a-z0-9-]+\.arena\.site|\d+-[a-z0-9-]+\.e2b\.app)$/i.test(window.location.hostname)) {
-    throw new SessionCookieError();
-  }
-  const body = await signInRequest("/api/demo/preview/session", "omit");
-  if (typeof body.token !== "string" || !/^[a-f0-9]{64}$/.test(body.token)) throw new SessionCookieError();
-  previewToken = body.token;
-  try {
-    if (!await checkDemoSession(AbortSignal.timeout(10000))) throw new SessionCookieError();
-  } catch (error) {
-    clearPreviewSession();
-    throw error;
-  }
+  throw new SessionCookieError();
 }

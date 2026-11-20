@@ -46,3 +46,9 @@ test("cookie-free preview sessions are isolated, temporary and never authenticat
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+process.env.NODE_ENV = "test";
+  delete process.env.DEMO_ADMIN_EMAIL;
+  delete process.env.DEMO_ADMIN_PASSWORD;
+  delete process.env.DEMO_CUSTOMER_EMAIL;
+  delete process.env.DEMO_CUSTOMER_PASSWORD;

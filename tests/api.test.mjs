@@ -9,6 +9,10 @@ import { day } from "../shared/ledger.mjs";
 test("demo HTTP API isolates workspaces, persists changes, and rejects invalid input", async () => {
   const dir = mkdtempSync(join(tmpdir(), "bank-preview-test-"));
   process.env.DEMO_DATA_DIR = dir;
+  process.env.NODE_ENV = "test";
+  delete process.env.DEMO_ADMIN_TOKEN;
+  process.env.DEMO_CUSTOMER_EMAIL = "customer@example.test";
+  process.env.DEMO_CUSTOMER_PASSWORD = "test-customer-password";
   const { demoApi } = await import("../server/api.mjs");
   const server = createServer((req, res) =>
     demoApi(req, res, () => {
