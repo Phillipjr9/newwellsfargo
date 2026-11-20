@@ -1,5 +1,11 @@
-import type { Account, Command, Workspace } from "../src/portal/model";
+import type { Account, Command, Entry, Workspace } from "../src/portal/model";
 export function day(offset?: number, base?: string | Date): string;
+export function isLedgerDate(value: unknown): value is string;
+export function checkOpeningDate(account: Account | undefined, date: string): void;
+export function nextDepositAvailability(postedOn: string): string;
+export function isDepositOnHold(entry: Entry, asOf?: string): boolean;
+export function heldDepositAmount(state: Workspace, account: Account, asOf?: string): number;
+export function availableBalance(state: Workspace, account: Account, asOf?: string): number;
 export const PEOPLE: {id: string; name: string; detail: string}[];
 export const WIRE_RECIPIENTS: typeof PEOPLE;
 export const LINKED_SAMPLES: Account[];

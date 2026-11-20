@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
-# Starts the dev server, runs a browser script against it, then stops the server.
-# Usage: tests/run-shots.sh <node-script> (env vars are passed through)
-set -u
+# Run one browser suite against its own development server and data directory.
+set -euo pipefail
 cd "$(dirname "$0")/.."
-
-if ! ls "$HOME/.cache/ms-playwright" 2>/dev/null | grep -q chromium_headless_shell; then
-  echo "Installing Chromium..."
-  timeout 400 npx playwright install --with-deps chromium > /tmp/pw-install.log 2>&1 || tail -3 /tmp/pw-install.log
+DATA_DIR="$(mktemp -d)"
+PORT="${PORT:-$((5200 + $$ % 4000))}"
+export DEMO_DATA_DIR="$DATA_DIR"
+export TEST_ORIGIN="http://127.0.0.1:$PORT"
+cleanup() {
+  if [[ -n "${SERVER:-}" ]]; then kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true; fi
+  rm -rf "$DATA_DIR"
+}
+trap cleanup EXIT
+if [[ -z "${CHROMIUM_EXECUTABLE:-}" ]] && ! ls "$HOME/.cache/ms-playwright" 2>/dev/null | grep -q chromium_headless_shell; then
+  npx playwright install --with-deps chromium
 fi
-
-npx vite --config vite.demo.config.ts --host 127.0.0.1 --port 5173 --strictPort > /tmp/dev.log 2>&1 &
+./node_modules/.bin/vite --config vite.demo.config.ts --host 127.0.0.1 --port "$PORT" --strictPort >"$DATA_DIR/vite.log" 2>&1 &
 SERVER=$!
 for _ in $(seq 1 40); do
-  curl -s -o /dev/null -m 2 http://127.0.0.1:5173/portal && break
+  if ! kill -0 "$SERVER" 2>/dev/null; then break; fi
+  if curl -sf -o /dev/null "$TEST_ORIGIN/api/demo/session"; then
+    timeout "${RUN_TIMEOUT:-300}" node "$1"
+    exit 0
+  fi
   sleep 0.5
 done
-
-timeout "${RUN_TIMEOUT:-150}" node "$1"
-STATUS=$?
-
-kill "$SERVER" 2>/dev/null
-pkill -f "vite --config vite.demo.config.ts" 2>/dev/null
-exit $STATUS
+cat "$DATA_DIR/vite.log" >&2
+exit 1

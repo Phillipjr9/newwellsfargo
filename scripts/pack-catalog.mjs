@@ -15,6 +15,11 @@ writeFileSync(
   `// Gzipped public page snapshots, decoded lazily. Rebuild: npm run catalog:pack\nexport const catalogData: Record<string, string> = ${JSON.stringify(Object.fromEntries(pageEntries))};\n`,
 );
 
+const searchEntries = Object.entries(catalog)
+  .filter(([route, page]) => route !== "/search" && page.status === 200)
+  .map(([route, page]) => [route, page.title.replace(/\s*[-|–]\s*Wells Fargo\s*$/i, "").trim() || page.title]);
+writeFileSync("src/public/search-index.json", JSON.stringify(searchEntries) + "\n");
+
 const stylesText = readFileSync("src/public/source-styles.ts", "utf8");
 const styles = JSON.parse(stylesText.slice(stylesText.indexOf("= {") + 2, stylesText.trimEnd().length - 1));
 const styleEntries = Object.entries(styles).map(([url, css]) => [url, encode(css)]);

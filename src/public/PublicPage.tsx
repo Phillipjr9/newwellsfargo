@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RotateCw } from "lucide-react";
 import globalSourceCss from "./public-global.css?raw";
 import { catalogData } from "./catalog-data";
+import searchIndex from "./search-index.json";
+import officialDestinations from "../../shared/official-destinations.json";
 import { styleData } from "./style-data";
 import { useRouter } from "../router/RouterContext";
 
@@ -28,6 +30,10 @@ function loadCachedPage(route: string): Promise<PublicPageRecord> {
     const packed = catalogData[route];
     if (!packed) return Promise.reject(new Error("No saved page for this route."));
     work = inflate(packed).then((text) => JSON.parse(text) as PublicPageRecord);
+    if (pageCache.size >= 24) {
+      const oldest = pageCache.keys().next().value;
+      if (oldest !== undefined) pageCache.delete(oldest);
+    }
     pageCache.set(route, work);
   }
   return work;
@@ -46,6 +52,8 @@ function loadSourceStyle(url: string): Promise<string> {
 const secureHosts = [
   "secure.wellsfargo.com",
   "oam.wellsfargo.com",
+  "privacycenter.wellsfargo.com",
+  "apply.wellsfargo.com",
   "accountoffers.wellsfargo.com",
   "appointments.wellsfargo.com",
   "icomplete.wellsfargo.com",
@@ -57,6 +65,8 @@ function isSecure(url: URL) {
 
 export function officialSource(path: string) {
   const normalized = `/${path.replace(/^\/+|\/+$/g, "")}/`.replace("//", "/");
+  const key = normalized.slice(0, -1);
+  if (Object.prototype.hasOwnProperty.call(officialDestinations, key)) return officialDestinations[key as keyof typeof officialDestinations];
   if (normalized === "/home/") return "https://www.wellsfargo.com/";
   if (normalized.startsWith("/credit-cards/")) return `https://creditcards.wellsfargo.com${normalized.slice(13) || "/"}`;
   if (normalized.startsWith("/guidance/")) return `https://getmoneyready.wf.com${normalized.slice(9) || "/"}`;
@@ -203,10 +213,34 @@ function wireSearchFilters(root: ShadowRoot, onCount?: (visible: number, total: 
   };
 }
 
+const normalizeSearch = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const searchable = searchIndex.map(([path, title]) => ({ path, title, key: normalizeSearch(`${path} ${title}`) }));
+
+function SavedSearch({ query, onSearch }: { query: string; onSearch: (q: string) => void }) {
+  const [value, setValue] = useState(query);
+  const [limit, setLimit] = useState(20);
+  const phrase = normalizeSearch(query);
+  const words = phrase.split(" ").filter(Boolean);
+  const matches = words.length ? searchable.filter(row => words.every(word => row.key.includes(word)))
+    .sort((a, b) => Number(normalizeSearch(b.path) === phrase) - Number(normalizeSearch(a.path) === phrase) || a.path.length - b.path.length) : [];
+  useEffect(() => { document.title = "Search | Wells Fargo"; }, []);
+  return <main className="public-page-error" id="main-content">
+    <h1>Search</h1>
+    <form className="site-search" role="search" onSubmit={(event) => { event.preventDefault(); onSearch(value.trim()); }}>
+      <label><span className="sr-only">Search terms</span><input name="search-input" type="search" placeholder="Search" value={value} maxLength={200} onChange={event => setValue(event.target.value)} /></label>
+      <button className="wf-button wf-button-dark" type="submit">Search</button>
+    </form>
+    <p role="status">{query ? `${matches.length} ${matches.length === 1 ? "result" : "results"} for “${query}”` : "Search by product or topic."}</p>
+    {matches.length > 0 && <ul>{matches.slice(0, limit).map(row => <li key={row.path}><a className="wf-button" href={row.path}>{row.title}</a></li>)}</ul>}
+    {limit < matches.length && <p><button type="button" className="wf-button" onClick={() => setLimit(n => n + 20)}>Show more results</button></p>}
+    {query && !matches.length && <p><a href={`https://www.wellsfargo.com/search/?q=${encodeURIComponent(query)}`}>Search on wellsfargo.com</a></p>}
+  </main>;
+}
+
 export default function PublicPage({ onLeave }: { onLeave: (url: string) => void }) {
   const { path, query, navigate } = useRouter();
   const normalized = path.replace(/\/+$/, "") || "/";
-  const queryKey = normalized === "/search" ? query.q || "" : "";
+  const queryKey = normalized === "/search" ? (query.q || "").trim().slice(0, 200) : "";
   const isSearch = normalized === "/search";
   const hasSnapshot = !isSearch && Boolean(catalogData[normalized]);
   const [record, setRecord] = useState<PublicPageRecord | undefined>(undefined);
@@ -226,20 +260,21 @@ export default function PublicPage({ onLeave }: { onLeave: (url: string) => void
       return () => { active = false; };
     }
     if (location.protocol === "file:") {
-      // Live search requires the local banking server; static pages remain available.
-      setError("Live search results are only available when the banking server is running.");
+      setError("Live results are unavailable.");
       return;
     }
-    fetch(`/api/public-page?path=${encodeURIComponent(normalized)}${queryKey ? `&q=${encodeURIComponent(queryKey)}` : ""}`)
+    const request = new AbortController();
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(isSearch ? 3500 : 25000)]);
+    fetch(`/api/public-page?path=${encodeURIComponent(normalized)}${queryKey ? `&q=${encodeURIComponent(queryKey)}` : ""}`, { signal })
       .then(async (response) => {
         const body = await response.json();
-        if (!response.ok) throw new Error(body.error || "Public page unavailable.");
+        if (!response.ok || typeof body?.html !== "string" || (isSearch && !body.html.includes("search-input"))) throw new Error(body?.error || "Public page unavailable.");
         return body as PublicPageRecord;
       })
       .then((page) => { if (active) setRecord(page); })
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : "Page unavailable."); });
-    return () => { active = false; };
-  }, [normalized, attempt, queryKey, hasSnapshot]);
+    return () => { active = false; request.abort(); };
+  }, [normalized, attempt, queryKey, hasSnapshot, isSearch]);
 
   useEffect(() => {
     const element = host.current;
@@ -374,7 +409,7 @@ export default function PublicPage({ onLeave }: { onLeave: (url: string) => void
     root.addEventListener("click", onClick);
     root.addEventListener("toggle", onToggle, true);
     root.addEventListener("submit", onSubmit);
-    document.title = `${record.title} | Wells Fargo`;
+    document.title = /Wells Fargo(?: Commercial Banking)?\s*$/i.test(record.title) ? record.title : `${record.title} | Wells Fargo`;
     const hash = window.location.hash.startsWith("#") && !window.location.hash.startsWith("#/") ? window.location.hash.slice(1) : "";
     if (hash) requestAnimationFrame(() => root.getElementById(hash)?.scrollIntoView());
     return () => {
@@ -386,6 +421,7 @@ export default function PublicPage({ onLeave }: { onLeave: (url: string) => void
     };
   }, [record, normalized, navigate, onLeave]);
 
+  if (isSearch && error && !record) return <SavedSearch key={queryKey} query={queryKey} onSearch={q => navigate("/search", q ? { q } : undefined)} />;
   if (error && !record) {
     return <main className="public-page-error" id="main-content">
       <h1>Public page unavailable</h1>
@@ -396,7 +432,7 @@ export default function PublicPage({ onLeave }: { onLeave: (url: string) => void
   }
   return <>
     {!record && <div className="public-page-loading" role="status">Loading the original public page…</div>}
-    <div className="public-page-host" ref={host} data-source={source} />
+    <div className="public-page-host" ref={host} data-route={normalized} data-source={source} />
     {error && <p className="public-page-cache-note" role="status">Showing the saved public page. <a href={source} target="_blank" rel="noreferrer">Check the live version</a></p>}
   </>;
 }

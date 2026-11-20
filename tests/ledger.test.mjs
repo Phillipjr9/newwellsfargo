@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   applyAction,
+  availableBalance,
+  heldDepositAmount,
+  nextDepositAvailability,
   createWorkspace,
   day,
   settleDue,
@@ -243,4 +246,66 @@ test("mobile check deposits post to the account and enforce limits", () => {
   assert.throws(() =>
     send(s, { kind: "deposit", from: "", to: "checking", amount: 20000, date: day(), frequency: "once", requestId: crypto.randomUUID() }),
   );
+});
+
+test("a Friday sample deposit is posted once and unavailable until Monday UTC", () => {
+  const friday = "2026-11-20";
+  const monday = "2026-11-23";
+  const account = state => state.accounts.find(a => a.id === "checking");
+  const ledger = createWorkspace();
+  ledger.payments = [];
+  account(ledger).balance = 50000;
+  const deposit = base({ kind: "deposit", from: "", to: "checking", amount: 20000, date: friday });
+  const initial = applyAction(ledger, { action: "submit", payload: deposit }, friday);
+  const retry = applyAction(initial.state, { action: "submit", payload: deposit }, friday);
+  assert.equal(retry.result, initial.result);
+  assert.equal(retry.state.transactions.filter(tx => tx.reference === retry.result).length, 1);
+  assert.equal(account(retry.state).balance, 70000);
+  assert.equal(heldDepositAmount(retry.state, account(retry.state), friday), 20000);
+  assert.equal(availableBalance(retry.state, account(retry.state), "2026-11-22"), 50000);
+  assert.equal(availableBalance(retry.state, account(retry.state), monday), 70000);
+  assert.equal(nextDepositAvailability("2026-11-22"), monday);
+  assert.equal(nextDepositAvailability(monday), "2026-11-24");
+  assert.equal(heldDepositAmount(retry.state, retry.state.accounts.find(a => a.id === "savings"), friday), 0);
+  for (const payment of [base({ amount: 50001, date: friday }), base({ kind: "person", to: "alex", amount: 50001, date: friday })]) {
+    assert.throws(() => applyAction(retry.state, { action: "submit", payload: payment }, friday), /more than your available balance/);
+  }
+  const later = applyAction(retry.state, { action: "submit", payload: base({ amount: 50001, date: monday }) }, monday);
+  assert.equal(account(later.state).balance, 19999);
+  // Historical deposits with no stored release date continue to be available immediately.
+  const legacy = structuredClone(retry.state);
+  delete legacy.transactions.find(tx => tx.reference === retry.result).availableOn;
+  assert.equal(availableBalance(legacy, account(legacy), friday), 70000);
+});
+
+test("scheduled transfers cannot use a held deposit before its release date", () => {
+  const friday = "2026-11-20";
+  const saturday = "2026-11-21";
+  const monday = "2026-11-23";
+  const ledger = createWorkspace();
+  ledger.payments = [];
+  const submit = (state, overrides) => applyAction(state, { action: "submit", payload: base(overrides) }, friday);
+  const early = submit(ledger, { date: saturday, amount: 480000 });
+  const later = submit(early.state, { date: monday, amount: 480000 });
+  const spent = submit(later.state, { date: friday, kind: "person", to: "alex", amount: 20000 });
+  const deposited = submit(spent.state, { date: friday, kind: "deposit", from: "", to: "checking", amount: 20000 });
+  assert.equal(balance(deposited.state, "checking"), 485022);
+  assert.equal(settleDue(deposited.state, monday), true);
+  assert.equal(deposited.state.payments.find(p => p.id === early.result).status, "failed");
+  assert.equal(deposited.state.payments.find(p => p.id === later.result).status, "completed");
+  assert.equal(balance(deposited.state, "checking"), 5022);
+});
+
+test("dated accounts reject payments and deposits from before opening day", () => {
+  const openingDate = "2026-11-20";
+  const previous = "2026-11-19";
+  const ledger = createWorkspace();
+  ledger.payments = [];
+  ledger.accounts.find(a => a.id === "savings").openingDate = openingDate;
+  const submit = (payload, today = previous) => applyAction(ledger, { action: "submit", payload: base(payload) }, today);
+  assert.throws(() => submit({ date: previous }), /before the account opened/);
+  assert.throws(() => submit({ from: "savings", to: "checking", date: previous }), /before the account opened/);
+  assert.throws(() => submit({ kind: "deposit", from: "", to: "savings", date: previous }), /before the account opened/);
+  const valid = submit({ date: openingDate }, openingDate);
+  assert.equal(valid.state.transactions.find(t => t.reference === valid.result).date, openingDate);
 });

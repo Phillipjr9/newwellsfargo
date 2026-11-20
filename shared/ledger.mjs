@@ -4,6 +4,36 @@ export function day(offset = 0, base = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
+export function isLedgerDate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && day(0, value) === value;
+}
+
+export function checkOpeningDate(account, date) {
+  if (account?.openingDate && (!isLedgerDate(date) || date < account.openingDate)) {
+    throw new DemoError(`Activity cannot be dated before the account opened (${account.openingDate}).`, 400);
+  }
+}
+
+// Workspace policy: next Monday–Friday date, measured in UTC. No holiday calendar.
+export function nextDepositAvailability(postedOn) {
+  let next = day(1, postedOn);
+  while ([0, 6].includes(new Date(next).getUTCDay())) next = day(1, next);
+  return next;
+}
+
+export function isDepositOnHold(entry, asOf = day()) {
+  return entry.category === "Mobile deposit" && entry.amount > 0 && Boolean(entry.availableOn && entry.availableOn > asOf);
+}
+
+export function heldDepositAmount(state, account, asOf = day()) {
+  if (!deposits(account)) return 0;
+  return state.transactions.reduce((sum, entry) => sum + (entry.accountId === account.id && isDepositOnHold(entry, asOf) ? entry.amount : 0), 0);
+}
+
+export function availableBalance(state, account, asOf = day()) {
+  return account.balance - heldDepositAmount(state, account, asOf);
+}
+
 export const PEOPLE = [
   { id: "sarah", name: "Sarah Miller", detail: "Contact" },
   { id: "alex", name: "Alex Chen", detail: "Contact" },
@@ -215,8 +245,11 @@ function nextDate(date, frequency, anchorDay) {
 }
 
 function execute(state, payment) {
+  const from = state.accounts.find(a => a.id === payment.from);
+  const dest = state.accounts.find(a => a.id === payment.to);
+  checkOpeningDate(from, payment.date);
+  if (["deposit", "transfer", "external", "payment"].includes(payment.kind)) checkOpeningDate(dest, payment.date);
   if (payment.kind === 'deposit') {
-    const dest = state.accounts.find((a) => a.id === payment.to);
     if (!dest) throw new DemoError('Choose an eligible deposit account.');
     dest.balance += payment.amount;
     state.transactions.unshift({
@@ -227,14 +260,13 @@ function execute(state, payment) {
       amount: payment.amount,
       category: 'Mobile deposit',
       status: 'posted',
+      availableOn: nextDepositAvailability(payment.date),
       reference: payment.id,
     });
     payment.status = 'completed';
     return;
   }
-  const from = state.accounts.find((a) => a.id === payment.from);
-  const dest = state.accounts.find((a) => a.id === payment.to);
-  if (!from || from.balance < payment.amount)
+  if (!from || availableBalance(state, from, payment.date) < payment.amount)
     throw new DemoError(
       "There are not enough available funds in the selected account.",
     );
@@ -343,6 +375,7 @@ function validate(state, input, editingId, today) {
     const dest = state.accounts.find((a) => a.id === to);
     if (!dest || !deposits(dest))
       throw new DemoError("Choose an eligible checking or savings account.");
+    checkOpeningDate(dest, date);
     const usage = mobileDepositUsage(state, today);
     if (usage.todayTotal + amount > MOBILE_DEPOSIT_LIMITS.daily)
       throw new DemoError(
@@ -371,10 +404,12 @@ function validate(state, input, editingId, today) {
     !(deposits(source) || (kind === "external" && source.type === "external"))
   )
     throw new DemoError("Select an eligible funding account.");
-  if (source.balance < amount)
+  if (availableBalance(state, source, today) < amount)
     throw new DemoError(
       "This amount is more than your available balance. Choose a smaller amount or another account.",
     );
+  checkOpeningDate(source, date);
+  if (["transfer", "external", "payment"].includes(kind)) checkOpeningDate(dest, date);
   if (from === to) throw new DemoError("Choose two different accounts.");
   let toName = dest?.name;
   if (kind === "transfer" && !deposits(dest))
@@ -511,7 +546,7 @@ export function applyAction(original, command, today = day()) {
     const sample = LINKED_SAMPLES.find((a) => a.id === input.id);
     if (!sample || state.accounts.some((a) => a.id === sample.id))
       throw new DemoError("Choose an unlinked bank account.");
-    state.accounts.push({ ...sample });
+    state.accounts.push({ ...sample, openingDate: today });
   } else if (command.action === "preference") {
     const key = input.key;
     if (!Object.hasOwn(state.preferences, key)) throw new DemoError("Invalid preference.");

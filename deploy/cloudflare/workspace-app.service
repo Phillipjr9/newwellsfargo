@@ -1,0 +1,27 @@
+[Unit]
+Description=Private workspace application
+After=network.target
+
+[Service]
+Type=simple
+User=workspace-app
+Group=workspace-app
+WorkingDirectory=/opt/workspace-app
+Environment=NODE_ENV=production HOST=127.0.0.1 PORT=3000 PATH=/usr/local/bin:/usr/bin:/bin
+Environment=DEMO_DATA_DIR=/var/lib/workspace-app PUBLIC_CACHE_DIR=/var/cache/workspace-app
+EnvironmentFile=/etc/workspace-app/workspace.env
+ExecStart=/usr/bin/env node /opt/workspace-app/server/start.mjs
+Restart=on-failure
+RestartSec=3
+StateDirectory=workspace-app
+StateDirectoryMode=0700
+CacheDirectory=workspace-app
+CacheDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

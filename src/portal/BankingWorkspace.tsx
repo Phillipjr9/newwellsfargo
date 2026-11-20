@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { isPreviewSession } from "../auth";
 import { useRouter } from "../router/RouterContext";
 import SiteFooter from "../components/SiteFooter";
 import { actionPaths, normalizedPortalPath, type PaymentKind } from "./model";
@@ -81,6 +82,7 @@ export default function BankingWorkspace({
     <div className="pb-workspace">
       <PortalHeader state={state} path={path} />
       <main id="portal-main" className="pb-wrap pb-main" tabIndex={-1}>
+        {isPreviewSession() && <p className="pb-small-note">This is a temporary workspace. Changes won’t be saved when you refresh or close the preview.</p>}
         {error && (
           <div role="alert" className="pb-error">
             {error}

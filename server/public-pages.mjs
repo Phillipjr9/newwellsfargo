@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import officialDestinations from "../shared/official-destinations.json" with { type: "json" };
 
 const PUBLIC_HOSTS = new Set([
   "www.wellsfargo.com",
@@ -14,6 +15,8 @@ const PUBLIC_HOSTS = new Set([
 const SECURE_HOSTS = [
   "secure.wellsfargo.com",
   "oam.wellsfargo.com",
+  "privacycenter.wellsfargo.com",
+  "apply.wellsfargo.com",
   "accountoffers.wellsfargo.com",
   "appointments.wellsfargo.com",
   "icomplete.wellsfargo.com",
@@ -47,6 +50,8 @@ export function sourceForPath(path) {
     "/jobs/": "https://www.wellsfargojobs.com/",
     "/espanol/": "https://www.wellsfargo.com/es/",
   };
+  const destination = officialDestinations[clean.slice(0, -1)];
+  if (destination) return destination;
   if (aliases[clean]) return aliases[clean];
   if (clean.startsWith("/credit-cards/")) return `https://creditcards.wellsfargo.com${clean.slice(13) || "/"}`;
   if (clean.startsWith("/guidance/")) return `https://getmoneyready.wf.com${clean.slice(9) || "/"}`;
@@ -168,11 +173,13 @@ const inflight = new Map();
 
 async function getRenderedPublicPage(target) {
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ timeout: 2500 });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: "en-US" });
-    await page.goto(target.href, { waitUntil: "domcontentloaded", timeout: 25000 });
-    await page.waitForTimeout(3000);
+    await page.goto(target.href, { waitUntil: "domcontentloaded", timeout: 2500 });
+    if (target.pathname === "/search/") await page.locator('input[name="search-input"]').waitFor({ timeout: 2000 });
+    const destination = new URL(page.url());
+    if (!PUBLIC_HOSTS.has(destination.hostname) || isSecureDestination(destination.href)) throw new Error("Official destination required.");
     const rendered = await page.evaluate(() => ({
       title: document.title,
       body: document.body.outerHTML,
@@ -187,7 +194,8 @@ export async function getPublicPage(path, searchQuery = "") {
   const requested = sourceForPath(path);
   const target = new URL(requested);
   if (target.pathname === "/search/" && searchQuery) target.searchParams.set("q", searchQuery.slice(0, 200));
-  if (isSecureDestination(requested) || !PUBLIC_HOSTS.has(target.hostname)) {
+  const normalized = String(path).toLowerCase().replace(/\/+$/, "");
+  if (officialDestinations[normalized] || normalized.startsWith("/auth/login/") || isSecureDestination(requested) || !PUBLIC_HOSTS.has(target.hostname)) {
     const error = new Error("This secure destination is available only on the official site.");
     error.code = 400;
     throw error;
@@ -217,7 +225,7 @@ export async function getPublicPage(path, searchQuery = "") {
       throw error;
     }
     const finalUrl = response.url;
-    if (isSecureDestination(finalUrl)) {
+    if (isSecureDestination(finalUrl) || !PUBLIC_HOSTS.has(new URL(finalUrl).hostname)) {
       const error = new Error("This destination requires official authentication.");
       error.code = 400;
       throw error;
@@ -244,7 +252,7 @@ export async function publicPageApi(req, res, next) {
     const page = await getPublicPage(query.get("path") || "/", query.get("q") || "");
     res.end(JSON.stringify(page));
   } catch (error) {
-    res.statusCode = error.code || 502;
+    res.statusCode = Number.isInteger(error.code) && error.code >= 400 && error.code <= 599 ? error.code : 502;
     res.end(JSON.stringify({ error: error.message || "Public page unavailable.", source: sourceForPath(new URL(req.url || "", "http://localhost").searchParams.get("path") || "/") }));
   }
 }

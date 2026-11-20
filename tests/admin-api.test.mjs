@@ -60,9 +60,14 @@ test("super-admin API protects, summarizes, audits and resets only demo workspac
 
     assert.equal((await fetch(`${origin}/api/admin/workspaces/${id}`, { method: "DELETE", headers: { ...json, ...admin }, body: "{}" })).status, 200);
     assert.equal((await fetch(`${origin}/api/admin/workspaces/${id}`, { headers: admin })).status, 404);
+    const secondLogin = await fetch(`${origin}/api/admin/session`, { method: "POST", headers: json, body: JSON.stringify({ token: process.env.DEMO_ADMIN_TOKEN }) });
+    assert.equal(secondLogin.status, 200);
+    const secondAdmin = { Cookie: secondLogin.headers.get("set-cookie").split(";")[0] };
     const signout = await fetch(`${origin}/api/admin/session`, { method: "DELETE", headers: { ...json, ...admin }, body: "{}" });
     assert.equal(signout.status, 200);
     assert.match(signout.headers.get("set-cookie"), /Max-Age=0/);
+    assert.equal((await fetch(`${origin}/api/admin/overview`, { headers: admin })).status, 401);
+    assert.equal((await fetch(`${origin}/api/admin/overview`, { headers: secondAdmin })).status, 200);
     assert.equal((await fetch(`${origin}/api/admin/overview`)).status, 401);
 
     delete process.env.DEMO_ADMIN_TOKEN;

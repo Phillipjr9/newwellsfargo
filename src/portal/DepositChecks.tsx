@@ -12,7 +12,7 @@ import { useRouter } from "../router/RouterContext";
 import { PageBack, PageIntro } from "./Chrome";
 import { PaymentNav } from "./Payments";
 import { dateLabel, isDeposit, money, type Workspace } from "./model";
-import { day, mobileDepositUsage, MOBILE_DEPOSIT_LIMITS } from "../../shared/ledger.mjs";
+import { availableBalance, day, mobileDepositUsage, MOBILE_DEPOSIT_LIMITS } from "../../shared/ledger.mjs";
 import { runCommand } from "./store";
 import heroImg from "../assets/deposit-hero.jpg";
 import getStartedImg from "../assets/deposit-get-started.png";
@@ -174,7 +174,7 @@ export default function DepositChecks({
         return "This amount is more than your remaining 30-day mobile deposit limit.";
     }
     if (step === 3 && (!front || !back))
-      return "Add a photo of the front and back of your endorsed check.";
+      return "Add front and back sample images to continue.";
     return "";
   };
 
@@ -232,6 +232,7 @@ export default function DepositChecks({
   };
 
   const current = STEPS[step];
+  const releaseDate = confirmedId ? state.transactions.find(entry => entry.reference === confirmedId && entry.category === "Mobile deposit")?.availableOn : undefined;
 
   return (
     <>
@@ -289,7 +290,7 @@ export default function DepositChecks({
               <ul className="pb-deposit-aftercare">
                 <li>Write “mobile deposit” and the date on the front of the check.</li>
                 <li>Keep the check in a safe place for 5 days, then destroy it.</li>
-                <li>Deposits made before 9 pm PT on business days are generally available the next day.</li>
+                {releaseDate && <li>Included in your current balance and available to spend on {dateLabel(releaseDate, true)} (UTC).</li>}
               </ul>
               <div className="pb-receipt-actions">
                 <a className="pb-button pb-solid" href={`/portal/accounts/${account?.id}`}>
@@ -319,7 +320,7 @@ export default function DepositChecks({
                           <strong>{a.name} ····{a.last4}</strong>
                           <small>
                             Available balance:{" "}
-                            {state.preferences.hideBalances ? "hidden" : money(a.balance)}
+                            {state.preferences.hideBalances ? "hidden" : money(availableBalance(state, a))}
                           </small>
                           <small>
                             Daily limit {money(MOBILE_DEPOSIT_LIMITS.daily)} · 30-day limit{" "}
@@ -364,7 +365,7 @@ export default function DepositChecks({
                   </p>
                   <p className="pb-small-note">
                     <ShieldCheck size={15} />
-                    Deposits made before 9 pm PT on business days are generally available the next day.
+                    This workspace adds the deposit to your current balance immediately and makes it available on the next weekday (UTC).
                   </p>
                 </div>
               )}
@@ -377,8 +378,7 @@ export default function DepositChecks({
                   </div>
                   <p className="pb-small-note">
                     <Camera size={15} />
-                    Endorse the back and write “For Mobile Deposit at Wells Fargo Only” below the
-                    signature before taking photos.
+                    Do not upload a real check. Images stay in this browser.
                   </p>
                 </div>
               )}

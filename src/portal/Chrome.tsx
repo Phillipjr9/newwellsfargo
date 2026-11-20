@@ -28,7 +28,6 @@ import {
 import { useRouter } from "../router/RouterContext";
 import wordmark from "../assets/wf-logo.png";
 import { exitWorkspace } from "./store";
-import { signDemoOut } from "../auth";
 import type { Workspace } from "./model";
 
 type MenuEntry = { label: string; href: string; icon: LucideIcon };
@@ -84,6 +83,8 @@ export function PortalHeader({
   const [menu, setMenu] = useState("");
   const [exiting, setExiting] = useState(false);
   const [exitError, setExitError] = useState("");
+  const lastInitial = [...state.profile.name.trim().split(/\s+/).slice(1).at(-1) || ""][0];
+  const shortName = lastInitial ? `${state.profile.firstName} ${lastInitial.toUpperCase()}.` : state.profile.firstName;
   const header = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const { navigate } = useRouter();
@@ -141,9 +142,8 @@ export function PortalHeader({
   async function leave() {
     setExiting(true);
     try {
-      await exitWorkspace();
-      signDemoOut();
-      navigate("/login");
+      const managed = await exitWorkspace();
+      navigate(managed ? "/portal/access" : "/login");
     } catch {
       setExitError("Couldn't end this session. Please try again.");
       setExiting(false);
@@ -178,11 +178,12 @@ export function PortalHeader({
             </a>
             <button
               className="pb-profile-trigger"
+              aria-label="Customer profile menu"
               aria-expanded={menu === "profile"}
               onClick={(e) => toggle("profile", e.currentTarget)}
             >
-              <span className="pb-avatar">HJ</span>
-              <span className="pb-profile-name">Henry J.</span>
+              <span className="pb-avatar">{state.profile.initials}</span>
+              <span className="pb-profile-name">{shortName}</span>
               <ChevronDown size={14} />
             </button>
             {menu === "profile" && (
