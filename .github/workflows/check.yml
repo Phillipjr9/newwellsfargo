@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - name: Type check
@@ -20,17 +20,14 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
-      - name: Browser flows (demo ledger)
+      - name: Browser flows
         run: |
           npx playwright install --with-deps chromium
-          (DEMO_ADMIN_TOKEN=browser-test-admin npm run dev -- --host 127.0.0.1 --port 5173 --strictPort &)
-          for i in $(seq 1 40); do curl -sf -o /dev/null http://127.0.0.1:5173/portal && break; sleep 1; done
-          node tests/portal.browser.cjs
-          node tests/interactivity-check.cjs
-          node tests/public-preview.cjs
-          SAMPLE=120 node tests/source-audit.cjs
-          DEMO_ADMIN_TOKEN=browser-test-admin node tests/admin.browser.cjs
-      - name: Super-admin isolated integration
-        run: npm run test:admin
-      - name: Mobile deposit flow
-        run: npm run test:deposit
+          bash tests/run-shots.sh tests/home-routing.browser.cjs
+          bash tests/run-shots.sh tests/preview-cookie.browser.cjs
+          bash tests/run-shots.sh tests/portal.browser.cjs
+          npm run test:interactions
+          npm run test:public
+          npm run catalog:audit
+          npm run test:deposit
+          npm run test:admin

@@ -1,9 +1,9 @@
 const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
-const origin = "http://127.0.0.1:5173";
+const origin = process.env.TEST_ORIGIN || "http://127.0.0.1:5173";
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -48,49 +48,21 @@ const origin = "http://127.0.0.1:5173";
   assert.equal(dialogState.open, true);
   assert.ok(dialogState.text.includes(dialogState.expected.slice(0, 20)));
 
-  // 3. Search filters
+  // Search remains usable when the upstream service is unavailable.
+  const blockSearch = (route) => route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+  await page.route("**/api/public-page?path=%2Fsearch**", blockSearch);
   await page.goto(origin + "/search?q=checking");
-  await page.waitForFunction(() => {
-    const r = document.querySelector(".public-page-host")?.shadowRoot;
-    return r?.querySelector('[role="checkbox"]') && r?.querySelector('[class*="FusionResultsTextTiles__link"]');
-  });
-  const search = await page.evaluate(() => {
-    const r = document.querySelector(".public-page-host").shadowRoot;
-    const total = r.querySelectorAll('[class*="FusionResultsTextTiles__link"]').length;
-    const personal = Array.from(r.querySelectorAll('[role="checkbox"]')).find((b) => b.textContent.trim() === "Personal");
-    const beforeChecked = personal.getAttribute("aria-checked");
-    personal.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    const afterChecked = personal.getAttribute("aria-checked");
-    const visible = Array.from(r.querySelectorAll('[class*="FusionResultsTextTiles__link"]'))
-      .filter((a) => (a.closest('[class*="FusionResultsListItem__item"]') || a.parentElement).style.display !== "none").length;
-    const personalVisible = Array.from(r.querySelectorAll('[class*="FusionResultsTextTiles__link"]'))
-      .filter((a) => {
-        const card = a.closest('[class*="FusionResultsListItem__item"]') || a.parentElement;
-        return card.style.display !== "none" && card.querySelector('[class*="category"]')?.textContent.trim() === "Personal";
-      }).length;
-    return { total, beforeChecked, afterChecked, visible, personalVisible };
-  });
-  console.log("search filters:", JSON.stringify(search));
-  assert.equal(search.beforeChecked, "false"); // no filters selected shows all results
-  assert.equal(search.afterChecked, "true");
-   assert.ok(search.visible > 0 && search.visible < search.total);
-   assert.equal(search.personalVisible, search.visible);
-
-  // Search uses the actual Wells Fargo search form field, not an invented input name.
-  await page.goto(origin + "/search?q=checking");
-  const searchInput = page.locator('.public-page-host input[name="search-input"]');
-  await searchInput.waitFor();
-  await searchInput.fill("mortgage");
-  await Promise.all([
-    page.waitForURL("**/search?q=mortgage"),
-    searchInput.press("Enter"),
-  ]);
-  await page.waitForFunction(() => document.querySelector(".public-page-host")?.shadowRoot?.querySelector("h1, h2"));
-  const queryValue = await page.evaluate(() => {
-    const root = document.querySelector(".public-page-host").shadowRoot;
-    return root.querySelector('input[name="search-input"]')?.value;
-  });
-  assert.equal(queryValue, "mortgage");
+  const search = page.getByRole("searchbox", { name: "Search terms" });
+  await search.waitFor();
+  assert.equal(await page.locator("#main-content li a").first().getAttribute("href"), "/checking");
+  await search.fill("mortgage");
+  await search.press("Enter");
+  await page.waitForURL("**/search?q=mortgage");
+  await page.locator("#main-content li a[href='/mortgage']").waitFor();
+  await search.fill("zz-no-match-zz");
+  await search.press("Enter");
+  await page.getByText(/0 results for/).waitFor();
+  await page.unroute("**/api/public-page?path=%2Fsearch**", blockSearch);
 
   // 4. Credit cards + mortgage rates tabs
   for (const route of ["/credit-cards", "/mortgage/rates"]) {

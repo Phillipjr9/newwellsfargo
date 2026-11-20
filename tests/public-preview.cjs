@@ -1,7 +1,7 @@
 const { chromium } = require('playwright');
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.on('pageerror', error => console.log('PAGEERROR', error.message));
   for (const [name, url] of [
@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
     ['mortgage', '/mortgage/'],
     ['legal', '/privacy-security/'],
   ]) {
-    await page.goto(`http://127.0.0.1:5173${url}`, { waitUntil: 'load' });
+    await page.goto(`${process.env.TEST_ORIGIN || 'http://127.0.0.1:5173'}${url}`, { waitUntil: 'load' });
     await page.locator('.public-page-host').waitFor();
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(500);
@@ -27,7 +27,7 @@ const { chromium } = require('playwright');
         mainClass: root.querySelector('main')?.className,
       };
     }));
-    await page.screenshot({ path: `.review/${name}.png` });
+    if (process.env.WRITE_SCREENSHOTS) await page.screenshot({ path: `.review/${name}.png` });
   }
   await browser.close();
 })().catch(error => { console.error(error); process.exit(1); });

@@ -4,14 +4,14 @@ const base = process.env.TEST_ORIGIN || "http://127.0.0.1:5173";
 const iso = (n = 0) =>
   new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 (async () => {
-  const b = await chromium.launch();
+  const b = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE });
   const c = await b.newContext({ viewport: { width: 1440, height: 1000 } });
   const p = await c.newPage();
-  p.setDefaultTimeout(7000);
+  p.setDefaultTimeout(15000);
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
   const go = async (path) => {
-    await p.goto(base + path);
+    await p.goto(base + path, { waitUntil: "domcontentloaded" });
     await p.locator("h1").waitFor();
   };
   const state = async () =>
@@ -31,7 +31,7 @@ const iso = (n = 0) =>
   const amount = p.locator(".pb-money-input input");
   const confirm = async () => {
     await p
-      .getByRole("button", { name: "Confirm demo payment", exact: true })
+      .getByRole("button", { name: "Confirm payment", exact: true })
       .click();
     await p.waitForURL("**/portal/payments/DEMO-*");
     await p.locator(".pb-receipt h1").waitFor();
@@ -42,7 +42,8 @@ const iso = (n = 0) =>
     await p.locator(".pb-payment-form").waitFor();
   };
   try {
-    await go("/");
+    await go("/portal");
+    await p.getByRole("button", { name: "One-click sign in" }).click();
     await p.locator(".pb-balance-value button:not(:disabled)").waitFor();
     const initial = await state();
     assert.equal(initial.accounts.length, 4);
@@ -63,7 +64,7 @@ const iso = (n = 0) =>
     let s = await state();
     assert.equal(bal(s, "checking"), 472467);
     assert.equal(bal(s, "savings"), 1437635);
-    await p.reload();
+    await p.reload({ waitUntil: "domcontentloaded" });
     await p.locator(".pb-receipt h1").waitFor();
     assert.match(
       await p.locator(".pb-receipt h1").innerText(),
@@ -74,14 +75,14 @@ const iso = (n = 0) =>
     );
     await nav("/portal/transfers/external");
     await p
-      .getByRole("button", { name: "Link a sample bank", exact: true })
+      .getByRole("button", { name: "Link a bank account", exact: true })
       .click();
     await p
       .getByRole("dialog")
-      .getByRole("button", { name: "Link sample bank", exact: true })
+      .getByRole("button", { name: "Link bank account", exact: true })
       .click();
     await p.getByRole("dialog").waitFor({ state: "hidden" });
-    await p.reload();
+    await p.reload({ waitUntil: "domcontentloaded" });
     await p.locator(".pb-money-input input").waitFor();
     await p.locator("select").first().selectOption("harbor");
     await p.locator("select").nth(1).selectOption("checking");
@@ -95,13 +96,13 @@ const iso = (n = 0) =>
       "PASS sample bank linking, deep-link reload and external inbound transfer",
     );
     await nav("/portal/send-money");
-    await p.getByLabel(/Sample recipient/).selectOption("alex");
+    await p.getByLabel(/^Recipient/).selectOption("alex");
     await amount.fill("12.50");
     await review();
     await confirm();
     assert.equal((await state()).payments[0].to, "alex");
     await nav("/portal/wires");
-    await p.getByLabel(/Sample recipient/).selectOption("orchard");
+    await p.getByLabel(/^Recipient/).selectOption("orchard");
     await amount.fill("75.25");
     await review();
     await confirm();
@@ -150,7 +151,7 @@ const iso = (n = 0) =>
     await p
       .getByRole("heading", { name: "Transfer cancelled", exact: true })
       .waitFor();
-    await p.reload();
+    await p.reload({ waitUntil: "domcontentloaded" });
     await p
       .getByRole("heading", { name: "Transfer cancelled", exact: true })
       .waitFor();
@@ -167,7 +168,7 @@ const iso = (n = 0) =>
     await go("/portal");
     await p.getByRole("button", { name: "Hide balances" }).click();
     await p.getByRole("button", { name: "Show balances" }).waitFor();
-    await p.reload();
+    await p.reload({ waitUntil: "domcontentloaded" });
     await p.getByRole("button", { name: "Show balances" }).waitFor();
     await p.getByRole("button", { name: "Show balances" }).click();
     await p.getByRole("button", { name: "Hide balances" }).waitFor();
@@ -182,14 +183,14 @@ const iso = (n = 0) =>
     await p.getByRole("dialog").waitFor({ state: "hidden" });
     let dl = p.waitForEvent("download");
     await p.getByRole("button", { name: "Export CSV" }).click();
-    assert.match((await dl).suggestedFilename(), /^DEMO-.*csv$/);
+    assert.match((await dl).suggestedFilename(), /^account-activity\.csv$/);
     await go("/portal/statements?account=checking");
     await p.getByRole("button", { name: "View report" }).click();
     await p.getByRole("dialog").waitFor();
     dl = p.waitForEvent("download");
-    await p.getByRole("button", { name: "Download demo report" }).click();
+    await p.getByRole("button", { name: "Download report" }).click();
     const download = await dl;
-    assert.match(download.suggestedFilename(), /^DEMO-/);
+    assert.match(download.suggestedFilename(), /^account-checking-.*-activity\.txt$/);
     const fs = require("node:fs");
     assert.match(
       fs.readFileSync(await download.path(), "utf8"),
@@ -202,22 +203,22 @@ const iso = (n = 0) =>
     await go("/portal/inbox");
     await p.getByRole("button", { name: "Mark all as read" }).click();
     await p.getByRole("button", { name: "All marked as read" }).waitFor();
-    await p.reload();
+    await p.reload({ waitUntil: "domcontentloaded" });
     await p.getByRole("button", { name: "All marked as read" }).waitFor();
     await go("/portal/settings");
-    const sw = p.getByRole("switch", { name: "Lock sample card" });
+    const sw = p.getByRole("switch", { name: "Lock card" });
     await sw.click();
     await p.waitForFunction(
       () =>
         document
-          .querySelector('[aria-label="Lock sample card"]')
+          .querySelector('[aria-label="Lock card"]')
           .getAttribute("aria-checked") === "true",
     );
-    await p.reload();
+    await p.reload({ waitUntil: "domcontentloaded" });
     await p.waitForFunction(
       () =>
         document
-          .querySelector('[aria-label="Lock sample card"]')
+          .querySelector('[aria-label="Lock card"]')
           ?.getAttribute("aria-checked") === "true",
     );
     await go("/portal");
@@ -226,21 +227,21 @@ const iso = (n = 0) =>
     assert.equal(await p.locator("footer .footer-investment li").count(), 3);
     await p.getByRole("link", { name: "Facebook", exact: true }).click();
     await p
-      .getByRole("dialog", { name: "You are leaving this preview" })
+      .getByRole("dialog", { name: "You are leaving Wells Fargo" })
       .waitFor();
     await p.getByRole("button", { name: "Cancel", exact: true }).click();
     await go("/home");
     assert.match(await p.locator("h1").innerText(), /checking bonus/);
     await go("/sign-on");
-    assert.equal(await p.locator("input").count(), 0);
-    await p.getByRole("link", { name: "Enter demo dashboard" }).click();
+    await p.getByRole("button", { name: "One-click sign in" }).click();
     await p.locator(".pb-accounts").waitFor();
     console.log(
       "PASS settings, inbox read status, full footer, public homepage and credential-free entry",
     );
     const isolated = await b.newContext();
     const other = await isolated.newPage();
-    await other.goto(base + "/portal");
+    await other.goto(base + "/portal", { waitUntil: "domcontentloaded" });
+    await other.getByRole("button", { name: "One-click sign in" }).click();
     await other.getByRole("button", { name: "Hide balances" }).waitFor();
     await other.locator(".pb-balance-value button:not(:disabled)").waitFor();
     assert.match(

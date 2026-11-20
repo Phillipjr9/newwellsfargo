@@ -1,0 +1,114 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createWorkspace, applyAction, day } from "../shared/ledger.mjs";
+
+test("restore validates against backup staff and admin ledger edits preserve available funds and references", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "admin-ledger-restore-"));
+  process.env.DEMO_DATA_DIR = directory;
+  process.env.DEMO_ADMIN_TOKEN = "isolated-admin-ledger-test-secret";
+  const { adminApi } = await import("../server/api.mjs");
+  const server = createServer((req, res) => adminApi(req, res, () => { res.writeHead(404); res.end(); }));
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = (path, method = "GET", body, cookie) => fetch(`${base}/api/admin/${path}`, {
+    method, signal: AbortSignal.timeout(2500), headers: { "Content-Type": "application/json", Origin: base, ...(cookie ? { Cookie: cookie } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  try {
+    const root = (await call("session", "POST", { token: process.env.DEMO_ADMIN_TOKEN })).headers.getSetCookie()[0].split(";")[0];
+    const id = "a".repeat(48), staffId = "b".repeat(24);
+    const ledger = createWorkspace();
+    const originalBalance = ledger.accounts[0].balance;
+    const { state: withHold } = applyAction(ledger, { action: "submit", payload: { kind: "deposit", from: "", to: "checking", amount: 30000, date: day(), frequency: "once", requestId: "admin-adjustment-test" } });
+    const backup = { version: 1, settings: { maintenanceMode: true }, admins: [{ id: staffId, active: true, name: "Restored Staff", email: "staff@example.test", role: "limited" }], assignments: { [id]: staffId }, workspaces: [{ id, state: withHold }] };
+    const restore = (body) => call("restore", "POST", body, root);
+    const dry = await restore({ ...backup, dryRun: true });
+    assert.deepEqual(await dry.json(), { dryRun: true, workspaces: 1, staff: 1, assignments: 1 });
+    assert.equal((await call(`workspaces/${id}`, "GET", undefined, root)).status, 404);
+    assert.equal((await restore({ ...backup, confirmation: "RESTORE", assignments: { [id]: "c".repeat(24) } })).status, 400);
+    assert.equal((await call(`workspaces/${id}`, "GET", undefined, root)).status, 404);
+    assert.equal((await restore({ ...backup, confirmation: "RESTORE" })).status, 200);
+    assert.equal((await (await call(`customers/${id}`, "GET", undefined, root)).json()).customer.ownerAdminId, staffId);
+    const { admins } = await (await call("admins", "GET", undefined, root)).json();
+    assert.equal(admins[0].signInEnabled, false);
+    const accounts = `users/${id}/accounts`, txs = `users/${id}/transactions`;
+    assert.equal((await call(`${accounts}/checking`, "PUT", { balance: "100" }, root)).status, 400);
+    assert.equal((await call(`${accounts}/checking`, "PUT", { balance: 29999 }, root)).status, 409);
+    assert.equal((await call(`${accounts}/checking`, "DELETE", {}, root)).status, 409);
+    assert.equal((await call(txs, "POST", { accountId: "checking", amount: -originalBalance - 1 }, root)).status, 409);
+    assert.equal((await call(txs, "POST", { accountId: "checking", amount: 100, status: "pending" }, root)).status, 400);
+    assert.equal((await call(`${txs}/sample-current-0`, "DELETE", {}, root)).status, 409);
+    const adjustment = await call(txs, "POST", { accountId: "checking", amount: 100 }, root);
+    assert.equal(adjustment.status, 200);
+    const { transaction } = await adjustment.json();
+    assert.equal((await call(`${txs}/${transaction.id}`, "PUT", { amount: 10.5 }, root)).status, 400);
+    assert.equal((await call(`${txs}/${transaction.id}`, "PUT", { amount: 200 }, root)).status, 200);
+    assert.equal((await call(`${txs}/${transaction.id}`, "DELETE", {}, root)).status, 200);
+    const updated = await call(`${accounts}/checking`, "PUT", { balance: originalBalance + 30050 }, root);
+    assert.equal(updated.status, 200);
+    const { state } = await (await call(`customers/${id}`, "GET", undefined, root)).json();
+    assert.equal(state.accounts[0].balance, originalBalance + 30050);
+    assert.equal(state.transactions[0].amount, 50);
+    assert.equal(state.transactions[0].source, "admin_adjustment");
+    const bulk = async (body, cookie = root) => call("customers/bulk", "POST", body, cookie);
+    assert.equal((await bulk({ ids: [id], action: "suspend" }, "invalid=1")).status, 401);
+    assert.equal((await bulk({ ids: [id, "e".repeat(48)], action: "suspend" })).status, 404);
+    assert.equal((await (await call(`customers/${id}`, "GET", undefined, root)).json()).customer.suspended, false);
+    assert.equal((await bulk({ ids: [id], action: "reassign", ownerAdminId: staffId })).status, 400);
+    const staff = await (await call("admins", "POST", { name: "Active agent", email: "agent@example.test", role: "limited" }, root)).json();
+    const staffCookie = (await call("staff/session", "POST", { email: staff.admin.email, code: staff.accessCode })).headers.getSetCookie()[0].split(";")[0];
+    assert.equal((await bulk({ ids: [id], action: "reassign", ownerAdminId: staff.admin.id }, staffCookie)).status, 403);
+    assert.equal((await bulk({ ids: [id], action: "reassign", ownerAdminId: staff.admin.id })).status, 200);
+    assert.equal((await (await call(`customers/${id}`, "GET", undefined, root)).json()).customer.ownerAdminId, staff.admin.id);
+    assert.equal((await bulk({ ids: [id], action: "reassign", ownerAdminId: null })).status, 200);
+    assert.equal((await (await call(`customers/${id}`, "GET", undefined, root)).json()).customer.ownerAdminId, null);
+    assert.deepEqual(await (await bulk({ ids: [id, id], action: "suspend" })).json(), { success: true, affected: 1 });
+    assert.deepEqual(await (await bulk({ ids: [id], action: "suspend" })).json(), { success: true, affected: 0 });
+
+    assert.equal((await call("customers/bulk", "POST", { ids: [id, id], action: "activate" }, root)).status, 200);
+
+    const openingDate = "2023-01-10";
+    const created = await (await call(accounts, "POST", { name: "Temporary Checking", type: "checking", openingDate }, root)).json();
+    const target = created.account.id;
+    const details = async () => (await (await call(`workspaces/${id}`, "GET", undefined, root)).json()).accountControls.find(row => row.id === target);
+    assert.equal((await details()).canClose, true);
+    assert.equal((await call(`${accounts}/${target}`, "PUT", { name: "Renamed Checking", nickname: "Reserve" }, root)).status, 200);
+    assert.equal((await details()).nickname, "Reserve");
+    const payload = { accountId: target, amount: 200, description: '=1+1, "Example"', date: openingDate, requestId: "test-manual-ledger" };
+    assert.equal((await call(txs, "POST", { ...payload, date: "2023-01-09" }, root)).status, 400);
+    const first = await (await call(txs, "POST", payload, root)).json();
+    assert.equal((await (await call(txs, "POST", payload, root)).json()).transaction.id, first.transaction.id);
+    assert.equal((await call(txs, "POST", { ...payload, amount: 201 }, root)).status, 409);
+    assert.equal((await details()).canClose, false);
+    const filters = `transactions?workspace=${id}&source=admin_adjustment&from=${openingDate}&to=${openingDate}&status=posted`;
+    const list = await (await call(filters, "GET", undefined, root)).json();
+    assert.equal(list.total, 1);
+    assert.equal(list.transactions[0].editable, true);
+    assert.equal(list.transactions[0].accountName, "Renamed Checking");
+    assert.equal((await call(`${filters}&format=csv`, "GET", undefined, staffCookie)).status, 403);
+    const csv = await call(`${filters}&format=csv`, "GET", undefined, root);
+    assert.match(csv.headers.get("content-type"), /^text\/csv/);
+    assert.match(await csv.text(), /"'=1\+1, ""Example""".*200/);
+    assert.equal((await call("transactions?from=2023-02-01&to=2023-01-01", "GET", undefined, root)).status, 400);
+    assert.equal((await call(`${txs}/${first.transaction.id}`, "DELETE", {}, root)).status, 200);
+    assert.equal((await call(txs, "POST", payload, root)).status, 409);
+    assert.equal((await details()).canClose, true);
+    assert.equal((await call(`${accounts}/${target}`, "DELETE", {}, root)).status, 200);
+    const audit = await (await call(`audit?workspace=${id}`, "GET", undefined, root)).json();
+    assert.ok(audit.entries.some(entry => entry.action === "customers_bulk_activate"));
+    assert.equal((await (await call("audit/integrity", "GET", undefined, root)).json()).integrity, true);
+    const auditPath = join(directory, "admin-audit.ndjson");
+    const auditLines = readFileSync(auditPath, "utf8").trim().split("\n");
+    auditLines[0] = auditLines[0].replace("admin_session_started", "admin_session_modified");
+    writeFileSync(auditPath, auditLines.join("\n") + "\n");
+    assert.equal((await (await call("audit/integrity", "GET", undefined, root)).json()).integrity, false);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

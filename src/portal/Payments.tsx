@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  availableBalance,
   day,
   LINKED_SAMPLES,
   PEOPLE,
@@ -484,7 +485,7 @@ export function MoneyPage({
                   Available:{" "}
                   {state.preferences.hideBalances
                     ? "Hidden"
-                    : money(source.balance)}
+                    : money(availableBalance(state, source))}
                 </small>
               </label>
               <label className="pb-field">
@@ -697,6 +698,8 @@ export function PaymentDetail({ state, id }: { state: Workspace; id: string }) {
     }
   }
   const isTransfer = ["transfer", "external"].includes(p.kind);
+  const isDepositRecord = p.kind === "deposit";
+  const availableOn = isDepositRecord ? state.transactions.find(entry => entry.reference === p.id && entry.category === "Mobile deposit")?.availableOn : undefined;
   return (
     <>
       <PageBack href="/portal/payments" label="Transfer & payment activity" />
@@ -713,11 +716,11 @@ export function PaymentDetail({ state, id }: { state: Workspace; id: string }) {
           </span>
           <p className="pb-eyebrow">Payment confirmation</p>
           <h1>
-            {isTransfer ? "Transfer" : "Payment"} {p.status}
+            {isDepositRecord ? "Deposit" : isTransfer ? "Transfer" : "Payment"} {p.status}
           </h1>
           <p className="pb-muted-copy">
             {p.status === "completed"
-              ? "Your account balances have been updated."
+              ? availableOn && availableOn > day() ? `Included in your current balance. Available ${dateLabel(availableOn, true)} (UTC).` : "Your account balances have been updated."
               : p.status === "scheduled"
                 ? "Your payment is on the calendar. No funds have moved yet."
                 : p.status === "cancelled"

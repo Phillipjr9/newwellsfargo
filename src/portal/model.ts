@@ -15,6 +15,7 @@ export interface Account {
   last4: string;
   type: AccountType;
   balance: number;
+  openingDate?: string;
   limit?: number;
   points?: number;
 }
@@ -27,6 +28,7 @@ export interface Entry {
   amount: number;
   status: string;
   reference?: string;
+  availableOn?: string;
 }
 export interface Draft {
   kind: PaymentKind;
@@ -53,6 +55,7 @@ export interface Workspace {
   accounts: Account[];
   transactions: Entry[];
   payments: Payment[];
+  messages?: { id: string; direction: string; subject: string; body: string; createdAt: string }[];
   bills: {
     id: string;
     name: string;
@@ -147,7 +150,6 @@ export function spending(state: Workspace, previous = false) {
 
 export function normalizedPortalPath(path: string) {
   const p = path.replace(/\/+$/, "") || "/";
-  if (p === "/") return "/portal";
   if (/^\/dashboard(?:\/|$)/.test(p))
     return normalizedPortalPath(p.replace(/^\/dashboard/, "/portal"));
   if (

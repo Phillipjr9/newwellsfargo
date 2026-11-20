@@ -5,7 +5,7 @@ DATA_DIR="$(mktemp -d)"
 PORT="${PORT:-$((5200 + $$ % 4000))}"
 export DEMO_DATA_DIR="$DATA_DIR"
 export DEMO_ADMIN_TOKEN="${DEMO_ADMIN_TOKEN:-browser-test-admin}"
-if ! ls "$HOME/.cache/ms-playwright" 2>/dev/null | grep -q chromium_headless_shell; then
+if [[ -z "${CHROMIUM_EXECUTABLE:-}" ]] && ! ls "$HOME/.cache/ms-playwright" 2>/dev/null | grep -q chromium_headless_shell; then
   npx playwright install --with-deps chromium >/dev/null
 fi
 

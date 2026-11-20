@@ -3,7 +3,8 @@ import { useRouter } from "../router/RouterContext";
 import Logo from "../components/Logo";
 import SiteFooter from "../components/SiteFooter";
 import type { OutsideLinkHandler } from "../components/ContentSections";
-import { signDemoIn } from "../auth";
+import { SessionCookieError, signDemoIn } from "../auth";
+import officialDestinations from "../../shared/official-destinations.json";
 import "./secure-login.css";
 
 function SearchIcon() {
@@ -14,23 +15,58 @@ function PasskeyIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="1.8"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M12 13.2c1.4 1.1 2.3 2.7 2.5 4.5M15 15l4.5 4.5M18 18l2-2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>;
 }
 
-export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }) {
+export default function SecureLogin({ onLeave, onSignedIn }: { onLeave: OutsideLinkHandler; onSignedIn?: () => void }) {
   const { navigate } = useRouter();
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(() => {
+    try { return localStorage.getItem("banking-sample-username") === "customer" ? "customer" : ""; } catch { return ""; }
+  });
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [saveUsername, setSaveUsername] = useState(false);
+  const [saveUsername, setSaveUsername] = useState(Boolean(username));
   const [searchOpen, setSearchOpen] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [cookieError, setCookieError] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const canRequestCookieAccess = window.self !== window.top && typeof document.requestStorageAccess === "function";
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  async function enter(allowCookies = false) {
+    if (busy) return;
+    setBusy(true);
     setLoginError("");
-    try { await signDemoIn(username, password); navigate("/portal"); }
-    catch (error) { setLoginError(error instanceof Error ? error.message : "Sign-on details weren't recognized."); }
+    setCookieError(false);
+    try {
+      if (allowCookies) {
+        try { await document.requestStorageAccess(); }
+        catch {
+          setLoginError("This preview couldn’t get permission to keep your sign-in session.");
+          setCookieError(true);
+          return;
+        }
+      }
+      await signDemoIn();
+      setPassword("");
+      if (onSignedIn) onSignedIn();
+      else navigate("/portal");
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "Sign-on failed.");
+      setCookieError(error instanceof SessionCookieError);
+    } finally { setBusy(false); }
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    setCookieError(false);
+    if (username !== "customer" || password !== "customer-password") {
+      setPassword("");
+      setLoginError("Select One-click sign in to continue here. Use wellsfargo.com to sign on to a real account.");
+      return;
+    }
+    if (saveUsername) { try { localStorage.setItem("banking-sample-username", "customer"); } catch { /* optional */ } }
+    else { try { localStorage.removeItem("banking-sample-username"); } catch { /* optional */ } }
+    void enter();
   }
 
   return (
@@ -49,8 +85,8 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
           </nav>
         </div>
         {searchOpen && (
-          <form className="secure-login-search-form" role="search" onSubmit={(event) => { event.preventDefault(); navigate("/search"); }}>
-            <label><span>Search Wells Fargo</span><input type="search" placeholder="Search" /></label>
+          <form className="secure-login-search-form" role="search" onSubmit={(event) => { event.preventDefault(); const q = String(new FormData(event.currentTarget).get("q") || "").trim(); navigate("/search", q ? { q } : undefined); }}>
+            <label><span>Search Wells Fargo</span><input type="search" name="q" placeholder="Search" /></label>
             <button type="submit" className="secure-login-search-submit">Search</button>
           </form>
         )}
@@ -64,7 +100,7 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
               <span className="secure-login-label">Username</span>
               <input
                 name="username"
-                autoComplete="username"
+                autoComplete="off"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
               />
@@ -76,7 +112,7 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
               <input
                 name="password"
                 type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
+                autoComplete="off"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
@@ -91,22 +127,26 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
             </label>
             <p className="secure-login-save-copy">To help keep your account secure, save your username only on devices that aren't used by other people.</p>
 
-            {loginError && <p className="ad-login-error" role="alert">{loginError}</p>}
+            {loginError && <p className="ad-login-error" role="alert">{loginError}{cookieError && <> <a href={window.location.href} target="_blank" rel="noopener noreferrer">Open sign-in in a new tab</a> and try again.</>}</p>}
 
-            <button type="submit" className="secure-login-submit" disabled={!username || !password}>Sign on</button>
+            <button type="submit" className="secure-login-submit" disabled={busy || !username || !password}>Sign on</button>
           </form>
 
           <div className="secure-login-divider"><span>or</span></div>
-          <button type="button" className="secure-login-passkey" onClick={async () => { try { await signDemoIn(username || "customer-passkey", password || "customer-password"); navigate("/portal"); } catch (error) { setLoginError(error instanceof Error ? error.message : "Sign-on failed."); } }}><PasskeyIcon />Use a passkey</button>
+          <button type="button" className="secure-login-passkey" onClick={() => onLeave(officialDestinations["/auth/login"])}><PasskeyIcon />Use a passkey</button>
           <p className="secure-login-passkey-copy">Don't have one? Create a passkey after signing on and skip the password next time.</p>
 
           <button
             type="button"
             className="secure-one-click-demo"
-            onClick={async () => { try { await signDemoIn("customer", "customer-password"); navigate("/portal"); } catch (error) { setLoginError(error instanceof Error ? error.message : "Sign-on failed."); } }}
+            disabled={busy}
+            onClick={() => void enter()}
           >
             One-click sign in
           </button>
+          {cookieError && canRequestCookieAccess && <button type="button" className="secure-one-click-demo" disabled={busy} onClick={() => void enter(true)}>
+            Allow sign-in in this preview
+          </button>}
           <button
             type="button"
             className="secure-one-click-admin"
@@ -115,6 +155,7 @@ export default function SecureLogin({ onLeave }: { onLeave: OutsideLinkHandler }
             Super admin login
           </button>
 
+          <a href="/portal/access" className="secure-login-forgot">Have a workspace invitation or access code?</a>
           <a className="secure-login-forgot" href="https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/" aria-haspopup="dialog" onClick={(event) => { event.preventDefault(); onLeave("https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/"); }}><span aria-hidden="true">→</span> Forgot username or password?</a>
         </section>
       </main>

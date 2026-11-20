@@ -1,0 +1,12 @@
+{
+  "/locator/wellsfargoadvisors": "https://locations.wellsfargoadvisors.com/search",
+  "/privacycenter": "https://privacycenter.wellsfargo.com/pcc/portal/enter",
+  "/mybt": "https://apply.wellsfargo.com/cookie_chk?resume_uri=%2Fgetting_started&product_code=CCBT&subproduct_code=BT",
+  "/redeem": "https://connect.secure.wellsfargo.com/auth/login/rewards",
+  "/locations": "https://locations.wellsfargo.com/search",
+  "/atms": "https://locations.wellsfargo.com/search",
+  "/appointments": "https://appointments.wellsfargo.com/maa/appointment/",
+  "/maa": "https://appointments.wellsfargo.com/maa/appointment/",
+  "/enroll": "https://www.wellsfargo.com/online-banking/",
+  "/auth/login": "https://connect.secure.wellsfargo.com/auth/login/present?origin=cob&LOB=CONS"
+}

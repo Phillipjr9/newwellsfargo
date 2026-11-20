@@ -1,165 +1,77 @@
 import { useEffect, useSyncExternalStore } from "react";
-import {
-  applyAction,
-  createWorkspace,
-  settleDue,
-} from "../../shared/ledger.mjs";
+import { createWorkspace } from "../../shared/ledger.mjs";
+import { clearPreviewSession, isPreviewSession, previewSessionHeaders } from "../auth";
 import type { Command, Workspace } from "./model";
 
-const localKey = "banking-preview-ledger-v2";
-const tabKey = "banking-preview-workspace";
-let workspaceKey = "";
-try {
-  workspaceKey = sessionStorage.getItem(tabKey) ?? "";
-} catch {
-  /* Storage may be unavailable in an embedded browser. */
-}
-const workspaceHeaders = (): Record<string, string> =>
-  workspaceKey ? { "X-Demo-Workspace": workspaceKey } : {};
-type Snapshot = {
-  state: Workspace;
-  ready: boolean;
-  error: string;
-  local: boolean;
-};
-let snapshot: Snapshot = {
-  state: createWorkspace(),
-  ready: false,
-  error: "",
-  local: false,
-};
-const subscribers = new Set<() => void>();
+const headers = { "X-Demo-Session": "required", "Content-Type": "application/json" };
+type Snapshot = { state: Workspace; ready: boolean; error: string };
+const empty = (): Snapshot => ({ state: createWorkspace(), ready: false, error: "" });
+let snapshot = empty();
 let pending: Promise<void> | null = null;
-let initialized = false;
+let generation = 0;
+const subscribers = new Set<() => void>();
 function publish(next: Partial<Snapshot>) {
   snapshot = { ...snapshot, ...next };
   subscribers.forEach((fn) => fn());
 }
 const listen = (fn: () => void) => {
   subscribers.add(fn);
-  return () => {
-    subscribers.delete(fn);
-  };
+  return () => { subscribers.delete(fn); };
 };
 
-function localWorkspace(): Workspace {
-  let state: Workspace | null = null;
-  const raw = localStorage.getItem(localKey);
-  if (raw) {
-    try {
-      const found = JSON.parse(raw);
-      if (
-        found.version === 2 &&
-        found.demo &&
-        Array.isArray(found.payments) &&
-        Array.isArray(found.accounts)
-      )
-        state = found;
-    } catch {
-      /* Ignore an incomplete old demo save. */
+function clearWorkspace() {
+  generation++;
+  pending = null;
+  publish(empty());
+}
+
+async function request(path: string, init: RequestInit = {}, active = generation) {
+  const preview = isPreviewSession();
+  const response = await fetch(`/api/demo/${preview ? "preview/" : ""}${path}`, {
+    ...init, headers: preview ? { ...headers, ...previewSessionHeaders() } : headers, cache: "no-store",
+    credentials: preview ? "omit" : "same-origin", signal: AbortSignal.timeout(10000),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401 && active === generation) {
+      clearPreviewSession();
+      clearWorkspace();
+      window.dispatchEvent(new Event("workspace-session-ended"));
     }
+    throw new Error(body.error || "The workspace is unavailable. Please try again.");
   }
-  state ??= createWorkspace();
-  settleDue(state);
-  localStorage.setItem(localKey, JSON.stringify(state));
-  return state;
+  return body;
 }
 
 export function refreshWorkspace() {
   if (pending) return pending;
-  pending = (async () => {
+  const active = generation;
+  return pending = (async () => {
     try {
-      if (location.protocol !== "file:" && !snapshot.local) {
-        const response = await fetch("/api/demo/workspace", {
-          credentials: "same-origin",
-          headers: workspaceHeaders(),
-          cache: "no-store",
-          signal: AbortSignal.timeout(10000),
-        });
-        if (
-          response.headers.get("Content-Type")?.includes("application/json")
-        ) {
-          if (!response.ok)
-            throw new Error(
-              "Your workspace is unavailable. Please refresh to try again.",
-            );
-          const { state } = await response.json();
-          if (!state?.demo || state.version !== 2)
-            throw new Error("Unexpected workspace response. Please refresh.");
-          workspaceKey = response.headers.get("X-Demo-Workspace") ?? "";
-          try {
-            sessionStorage.setItem(tabKey, workspaceKey);
-          } catch {
-            /* The in-memory key still works without cookies or storage. */
-          }
-          publish({ state, ready: true, error: "", local: false });
-          initialized = true;
-          return;
-        }
-        if (!response.ok && response.status !== 404)
-          throw new Error("The workspace server is unavailable. Please try again.");
-      }
-      // A static export uses the same validated ledger as the server, in this browser only.
-      publish({ state: localWorkspace(), ready: true, error: "", local: true });
-      initialized = true;
+      const { state } = await request("workspace", {}, active);
+      if (!state?.demo || state.version !== 2) throw new Error("Unexpected workspace response. Please try again.");
+      if (active === generation) publish({ state, ready: true, error: "" });
     } catch (e) {
-      publish({
-        ready: false,
-        error:
-          e instanceof Error
-            ? e.message
-            : "Couldn't load the workspace. Please refresh.",
-      });
+      if (active === generation) publish({ ready: false, error: e instanceof Error ? e.message : "Could not load the workspace." });
+    } finally {
+      if (active === generation) pending = null;
     }
-  })().finally(() => {
-    pending = null;
-  });
-  return pending;
+  })();
 }
 
 export async function runCommand(command: Command) {
-  if (!snapshot.ready)
-    throw new Error(
-      "Wait for the workspace to finish loading, then try again.",
-    );
-  if (snapshot.local) {
-    const out = applyAction(localWorkspace(), command);
-    localStorage.setItem(localKey, JSON.stringify(out.state));
-    publish({ state: out.state, error: "" });
-    return out.result;
-  }
-  const response = await fetch("/api/demo/action", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { ...workspaceHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify(command),
-    signal: AbortSignal.timeout(10000),
-  });
-  const out = await response.json();
-  if (!response.ok)
-    throw new Error(out.error || "The change could not be saved.");
-  publish({ state: out.state, error: "" });
+  if (!snapshot.ready) throw new Error("Wait for the workspace to finish loading, then try again.");
+  const active = generation;
+  const out = await request("action", { method: "POST", body: JSON.stringify(command) }, active);
+  if (active === generation) publish({ state: out.state, error: "" });
   return out.result as string | null;
 }
 
 export async function exitWorkspace() {
-  if (!snapshot.local) {
-    const res = await fetch("/api/demo/exit", {
-      method: "POST",
-      headers: { ...workspaceHeaders(), "Content-Type": "application/json" },
-      body: "{}",
-    });
-    if (!res.ok && res.status !== 409)
-      throw new Error("Could not end the session. Please retry.");
-  } else localStorage.removeItem(localKey);
-  initialized = false;
-  workspaceKey = "";
-  try {
-    sessionStorage.removeItem(tabKey);
-  } catch {
-    /* No persistent key to remove. */
-  }
-  publish({ state: createWorkspace(), ready: false, error: "", local: false });
+  const result = await request("exit", { method: "POST", body: "{}" });
+  clearPreviewSession();
+  clearWorkspace();
+  return result.managed === true;
 }
 
 export const workspaceAvailable = () => snapshot.ready;
@@ -167,10 +79,8 @@ export const workspaceAvailable = () => snapshot.ready;
 export function useWorkspace() {
   const current = useSyncExternalStore(listen, () => snapshot);
   useEffect(() => {
-    if (!initialized) void refreshWorkspace();
-    const sync = () => {
-      if (document.visibilityState === "visible") void refreshWorkspace();
-    };
+    void refreshWorkspace();
+    const sync = () => { if (document.visibilityState === "visible") void refreshWorkspace(); };
     document.addEventListener("visibilitychange", sync);
     return () => document.removeEventListener("visibilitychange", sync);
   }, []);

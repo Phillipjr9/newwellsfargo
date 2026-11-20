@@ -18,7 +18,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
 } from "lucide-react";
-import { day } from "../../shared/ledger.mjs";
+import { availableBalance, day, heldDepositAmount, isDepositOnHold } from "../../shared/ledger.mjs";
 import { useRouter } from "../router/RouterContext";
 import Dialog from "../components/Dialog";
 import { AccountArt, ActivityRows, SpendChart } from "./Overview";
@@ -174,6 +174,9 @@ export function AccountActivity({
 }) {
   const account = state.accounts.find((a) => a.id === id);
   if (id && !account) return <MissingPage />;
+  const today = day();
+  const holds = account && isDeposit(account) ? state.transactions.filter(entry => entry.accountId === account.id && isDepositOnHold(entry, today)) : [];
+  const nextRelease = holds.map(entry => entry.availableOn!).sort()[0];
   return (
     <>
       <PageBack />
@@ -195,7 +198,7 @@ export function AccountActivity({
               <strong>
                 {state.preferences.hideBalances
                   ? "••••••"
-                  : money(account.balance)}
+                  : money(availableBalance(state, account, today))}
               </strong>
             </span>
           </div>
@@ -256,6 +259,7 @@ export function AccountActivity({
       )}
       {account && (
         <dl className="pb-balance-facts">
+          {account.openingDate && <div><dt>Opened</dt><dd>{dateLabel(account.openingDate, true)}</dd></div>}
           <div>
             <dt>Account ending</dt>
             <dd>{account.last4}</dd>
@@ -263,7 +267,7 @@ export function AccountActivity({
           <div>
             <dt>
               {isDeposit(account)
-                ? "Posted balance"
+                ? "Current balance"
                 : account.type === "credit"
                   ? "Credit limit"
                   : "Principal balance"}
@@ -278,6 +282,11 @@ export function AccountActivity({
                   )}
             </dd>
           </div>
+          {isDeposit(account) && <div>
+            <dt>On hold</dt>
+            <dd>{state.preferences.hideBalances ? "Hidden" : money(heldDepositAmount(state, account, today))}</dd>
+            {nextRelease && <small>Next release: {dateLabel(nextRelease, true)} (UTC)</small>}
+          </div>}
           <div>
             <dt>
               {account.type === "credit" ? "Card status" : "Account status"}
@@ -409,7 +418,7 @@ export function Statements({ state }: { state: Workspace }) {
           <div className="pb-panel-foot">
             <span className="pb-small-note">
               <Info size={15} />
-              Report not found<br />: official bank statements are not available here.
+              Activity reports are available above. They are not official bank statements.
             </span>
           </div>
         </section>
@@ -570,8 +579,8 @@ export function Preferences({ state }: { state: Workspace }) {
           </div>
         </section>
         <aside className="pb-panel pb-side-help">
-          <span className="pb-large-avatar">HJ</span>
-          <h2>Henry Johnson</h2>
+          <span className="pb-large-avatar">{state.profile.initials}</span>
+          <h2>{state.profile.name}</h2>
           <p>Customer profile</p>
           <div className="pb-rail-divider" />
           <p>
@@ -623,7 +632,7 @@ export function MessageCenter({ state }: { state: Workspace }) {
     ...state.accounts
       .filter(
         (a) =>
-          isDeposit(a) && a.balance < 10000 && state.preferences.lowBalance,
+          isDeposit(a) && availableBalance(state, a) < 10000 && state.preferences.lowBalance,
       )
       .map((a) => ({
         title: "Low balance alert",
@@ -681,6 +690,12 @@ export function MessageCenter({ state }: { state: Workspace }) {
           </button>
         </div>
         <ErrorMessage text={error} />
+        {state.messages?.filter((message) => message.direction === "staff").slice().reverse().map((message) => (
+          <article className="pb-message-row" key={message.id}>
+            <span className="pb-soft-icon"><Inbox size={20} /></span>
+            <div><strong>{message.subject}</strong><p>{message.body}</p><p>{dateLabel(message.createdAt, true)}</p></div>
+          </article>
+        ))}
         {messages.map(({ title, text, href, icon: Icon }, i) => (
           <a className="pb-message-row" key={i} href={href}>
             <span className="pb-soft-icon">

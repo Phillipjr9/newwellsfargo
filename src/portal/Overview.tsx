@@ -22,7 +22,7 @@ import {
   Wallet,
   Zap,
 } from "lucide-react";
-import { day } from "../../shared/ledger.mjs";
+import { availableBalance, day, isDepositOnHold } from "../../shared/ledger.mjs";
 import {
   balanceLabel,
   dateLabel,
@@ -143,7 +143,7 @@ export function AccountRows({ state }: { state: Workspace }) {
               </span>
               <span className="pb-account-balance">
                 <strong>
-                  {state.preferences.hideBalances ? "••••••" : money(a.balance)}
+                  {state.preferences.hideBalances ? "••••••" : money(isDeposit(a) ? availableBalance(state, a) : a.balance)}
                 </strong>
                 <small>{balanceLabel(a)}</small>
               </span>
@@ -347,6 +347,7 @@ export function ActivityRows({
                   <strong>{t.description}</strong>
                   <small>
                     {acct?.name} &middot; {acct?.last4}
+                    {isDepositOnHold(t) && t.availableOn && ` · On hold until ${dateLabel(t.availableOn)}`}
                   </small>
                 </span>
                 <span className="pb-tx-date">{dateLabel(t.date)}</span>
@@ -519,13 +520,13 @@ export default function Overview({
             <div className="pb-balance-copy">
               <div className="pb-balance-label">
                 <Wallet size={17} strokeWidth={1.6} />
-                Total deposit balance
+                Total available deposit balance
               </div>
               <div className="pb-balance-value">
                 <strong>
                   {state.preferences.hideBalances
                     ? "••••••"
-                    : money(deposits.reduce((s, a) => s + a.balance, 0))}
+                    : money(deposits.reduce((s, a) => s + availableBalance(state, a), 0))}
                 </strong>
                 <button
                   disabled={!ready}
