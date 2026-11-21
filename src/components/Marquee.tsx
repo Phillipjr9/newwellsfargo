@@ -2,30 +2,31 @@ import checkingDesktop from "../assets/checking-desktop.jpg";
 import checkingTablet from "../assets/checking-tablet.jpg";
 import checkingMobile from "../assets/checking-mobile.jpg";
 import { CHECKING_OFFER_URL } from "../campaigns";
-import { bankUrl, PRODUCT_NAV, SIGN_ON_URL } from "../data";
+import { bankUrl, PRODUCT_NAV } from "../data";
+import { useNavigate } from "./Icons";
 
 function SignOnPreview() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const navigate = useNavigate();
 
   return (
-    <aside className="signon-preview" aria-labelledby="signon-title" aria-describedby="signon-notice">
+    <aside className="signon-preview" aria-labelledby="signon-title">
       <div className="signon-body">
         <h2 id="signon-title">{greeting}</h2>
         <p>Sign on to manage your accounts.</p>
-        <p id="signon-notice">Sign on at wellsfargo.com.</p>
         <div className="signon-sample" aria-hidden="true">
           <div className="signon-line">Username</div>
           <div className="signon-line">Password <span>Show</span></div>
           <div className="signon-sample-check"><span />Save username</div>
         </div>
         <div className="signon-actions">
-          <a className="wf-button wf-button-red" href={SIGN_ON_URL}>Sign On</a>
+          <button type="button" className="wf-button wf-button-red" onClick={() => navigate("/login")}>Sign On</button>
           <a href="/enroll">Enroll</a>
         </div>
       </div>
       <div className="signon-links">
-        <a href="/login?passkey=1">Sign on with a passkey</a>
+        <button type="button" className="signon-link" onClick={() => navigate("/login?passkey=1")}>Sign on with a passkey</button>
         <a href="https://oam.wellsfargo.com/oamo/identity/help/passwordhelp/">Forgot username or password?</a>
         <a href={bankUrl("/privacy-security/fraud/")}>Security Center</a>
       </div>

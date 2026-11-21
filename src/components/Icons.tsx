@@ -1,4 +1,5 @@
 import type { SVGProps } from "react";
+import { useRouter } from "../router/RouterContext";
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -14,6 +15,13 @@ const base = (size: number) => ({
   "aria-hidden": true,
   focusable: false,
 });
+
+export const useNavigate = () => {
+  const navigate = useRouter()?.navigate ?? (() => undefined);
+  return navigate;
+};
+
+export const SIGN_ON_PATH = "/login";
 
 export function SearchIcon({ size = 22, ...p }: IconProps) {
   return (

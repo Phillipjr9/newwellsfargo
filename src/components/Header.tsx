@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "../router/RouterContext";
-import { bankUrl, LOCATIONS_URL, MENU_CATEGORIES, MENU_LINKS, SIGN_ON_URL, type MenuCategory } from "../data";
+import { bankUrl, LOCATIONS_URL, MENU_CATEGORIES, MENU_LINKS, type MenuCategory } from "../data";
 import { MENU_ICONS } from "../menuIcons";
 import Dialog from "./Dialog";
-import { ChevronLeft, ChevronRight, CloseIcon, SearchIcon } from "./Icons";
+import { ChevronLeft, ChevronRight, CloseIcon, SearchIcon, useNavigate } from "./Icons";
 import Logo from "./Logo";
 import { HelpDialog } from "./Support";
 import "../navigation.css";
@@ -243,6 +243,7 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
 export default function Header() {
   const { path } = useRouter();
   const [panel, setPanel] = useState<Panel>(null);
+  const navigate = useNavigate();
   const close = () => setPanel(null);
 
   useEffect(() => {
@@ -266,7 +267,7 @@ export default function Header() {
               <button className="utility-link masthead-search" type="button" aria-label="Search" aria-haspopup="dialog" onClick={() => setPanel("search")}>
                 <SearchIcon size={27} strokeWidth={1.05} />
               </button>
-              <a className="masthead-signon" href={SIGN_ON_URL}>Sign On</a>
+              <button type="button" className="masthead-signon" onClick={() => navigate("/login")}>Sign On</button>
               <button className="masthead-menu" type="button" onClick={() => setPanel("menu")} aria-haspopup="dialog" aria-expanded={panel === "menu"} aria-label="Open menu">
                 <span className="menu-lines" aria-hidden="true"><i /><i /><i /></span>
                 <span>MENU</span>
