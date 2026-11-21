@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import {
   ArrowLeftRight,
   ArrowRight,
@@ -10,7 +10,9 @@ import {
   CircleHelp,
   CreditCard,
   FileText,
+  Fullscreen,
   Globe2,
+  IdCard,
   Landmark,
   ListClock,
   LogOut,
@@ -23,14 +25,32 @@ import {
   UserRound,
   Wallet,
   X,
-  type LucideIcon,
 } from "lucide-react";
-import { useRouter } from "../router/RouterContext";
 import wordmark from "../assets/wf-logo.png";
 import { exitWorkspace } from "./store";
 import type { Workspace } from "./model";
 
-type MenuEntry = { label: string; href: string; icon: LucideIcon };
+type MenuEntry = { label: string; href: string; icon: ComponentType<{ size: number; strokeWidth?: number }> };
+export const accountDetailsRoute = (type: string) => `/portal/account-details/${type}`;
+export const accountLinksByType: Record<string, MenuEntry[]> = {
+  checking: [
+    { label: "Checking", href: "/portal/account-details/checking", icon: IdCard },
+    { label: "Checking activity", href: "/portal/account-details/transactions", icon: Fullscreen },
+  ],
+  savings: [
+    { label: "Savings", href: "/portal/account-details/savings", icon: Wallet },
+    { label: "Savings activity", href: "/portal/account-details/transactions", icon: Fullscreen },
+  ],
+  credit: [
+    { label: "Credit card", href: "/portal/account-details/credit", icon: CreditCard },
+    { label: "My cards", href: "/portal/cards", icon: IdCard },
+    { label: "Card activity", href: "/portal/account-details/transactions", icon: Fullscreen },
+  ],
+  loan: [
+    { label: "Home loan", href: "/portal/account-details/loan", icon: Landmark },
+    { label: "Loan activity", href: "/portal/account-details/transactions", icon: Fullscreen },
+  ],
+};
 export const paymentLinks: MenuEntry[] = [
   { label: "Transfer money", href: "/portal/transfers", icon: ArrowLeftRight },
   {
@@ -87,7 +107,7 @@ export function PortalHeader({
   const shortName = lastInitial ? `${state.profile.firstName} ${lastInitial.toUpperCase()}.` : state.profile.firstName;
   const header = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
-  const { navigate } = useRouter();
+  // The router is used via AppRoutes navigation; leave() calls exitWorkspaceToLogin().
   const toggle = (key: string, el: HTMLButtonElement) => {
     trigger.current = el;
     setMenu(menu === key ? "" : key);
@@ -143,7 +163,8 @@ export function PortalHeader({
     setExiting(true);
     try {
       const managed = await exitWorkspace();
-      navigate(managed ? "/portal/access" : "/login");
+      if (managed) { window.location.replace("/portal/access"); }
+      else { window.location.replace("/login"); }
     } catch {
       setExitError("Couldn't end this session. Please try again.");
       setExiting(false);

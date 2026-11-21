@@ -19,6 +19,8 @@ import {
   SpendingPage,
   Statements,
 } from "./AccountServices";
+import { AccountDetails } from "./AccountDetails";
+import { CardsPage } from "./Cards";
 import DepositChecks from "./DepositChecks";
 import { refreshWorkspace, useWorkspace } from "./store";
 import "./portal.css";
@@ -71,8 +73,14 @@ export default function BankingWorkspace({
         id={path === "/portal/activity" ? undefined : path.split("/").pop()}
       />
     );
+  else if (path.startsWith("/portal/account-details/transactions"))
+    page = <AccountActivity key={key} state={state} />;
+  else if (path.startsWith("/portal/account-details/"))
+    page = <AccountDetails key={key} state={state} id={path.split("/").pop()} />;
   else if (path === "/portal/statements")
     page = <Statements state={state} key={key} />;
+  else if (path === "/portal/cards")
+    page = <CardsPage state={state} />;
   else if (path === "/portal/inbox") page = <MessageCenter state={state} />;
   else if (path === "/portal/settings") page = <Preferences state={state} />;
   else if (path === "/portal/spending") page = <SpendingPage state={state} />;

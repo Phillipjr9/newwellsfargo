@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { checkDemoSession, SessionCookieError } from "../auth";
+import { checkPortalSession, SessionCookieError } from "../auth";
 import { PageIntro } from "./Chrome";
 
 export default function WorkspaceAccess() {
@@ -35,7 +35,7 @@ export default function WorkspaceAccess() {
         setIssued(result.accessCode);
         setCode("");
       } else {
-        if (result.authenticated !== true || !await checkDemoSession(AbortSignal.timeout(10000), true)) {
+        if (result.authenticated !== true || !await checkPortalSession()) {
           throw new SessionCookieError();
         }
         // Reload to ensure no previously opened workspace remains in the browser cache.

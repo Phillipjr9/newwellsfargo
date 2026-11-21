@@ -7,8 +7,19 @@ import {
   unlinkSync,
   readdirSync,
   rmSync,
+  appendFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { spawnSync as nodeSpawnSync } from "node:child_process";
+
+function spawnSync(cmd, args, options = {}) {
+  try {
+    const { spawnSync: spawn } = require("node:child_process");
+    return spawn(cmd, args, options);
+  } catch (error) {
+    return nodeSpawnSync(cmd, args, options);
+  }
+}
 import { installRestore, recoverRestore } from "./restore-journal.mjs";
 import { homedir } from "node:os";
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual, scryptSync } from "node:crypto";
@@ -23,6 +34,75 @@ import {
   nextDepositAvailability,
   settleDue,
 } from "../shared/ledger.mjs";
+
+// Helpers for the /api/demo/ worker bridges.
+function serveJson(req, res, body, status = 200, extraHeaders = {}) {
+  if (res.writeHead) res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...extraHeaders });
+  res.statusCode = status;
+  res.end(body);
+}
+
+async function runCurlBridge(req, res, method, u) {
+  try {
+    if (method === "GET") {
+      const result = spawnSync("curl", ["-sS", "-L", "-m", "15", "-D", "-", "-o", "-", u], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+      const stdout = result.stdout || "";
+      const split = stdout.indexOf("\r\n\r\n");
+      const headers = split >= 0 ? stdout.slice(0, split) : "";
+      const body = split >= 0 ? stdout.slice(split + 4) : stdout;
+      const statusMatch = (headers || "").match(/^HTTP\/1\.1 (\d{3})/im);
+      return serveJson(req, res, body, statusMatch ? Number(statusMatch[1]) : 200);
+    }
+    const result = spawnSync("curl", ["-s", "-m", "15", "-X", method, u], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+    return serveJson(req, res, JSON.stringify({ url: u, method, stdout: result.stdout ?? "" }));
+  } catch (error) {
+    return serveJson(req, res, JSON.stringify({ error: error instanceof Error ? error.message : "Worker bridge failed." }));
+  }
+}
+
+async function runPythonAgentBridge(req, res) {
+  let method = "public_models";
+  let params = {};
+  if (req.method === "POST") {
+    const chunks = [];
+    for await (const chunk of req) { if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))); }
+    const body = Buffer.concat(chunks).toString("utf8");
+    const contentType = String(req.headers["content-type"] || "");
+    if (/application\/json/.test(contentType)) {
+      try { const parsed = body ? JSON.parse(body) : {}; method = String(parsed.method ?? method); params = parsed.params ?? {}; } catch { }
+    } else {
+      const form = new URLSearchParams(body);
+      method = form.get("method") || method;
+      const nested = form.get("params");
+      try { params = nested ? (JSON.parse(nested) ?? {}) : Object.fromEntries(form.entries().filter(([k]) => k !== "method" && k !== "params")); } catch { params = {}; }
+    }
+  }
+  let result;
+  try {
+    const { fileURLToPath } = await import("node:url");
+    const { dirname, join } = await import("node:path");
+    const cwd = dirname(fileURLToPath(import.meta.url));
+    const agentPath = join(cwd, "..", "src", "python_agent.py");
+    result = spawnSync("python3", [agentPath, JSON.stringify({ method, params })],
+      { encoding: "utf8", timeout: 60000, maxBuffer: 8 * 1024 * 1024, cwd,
+        env: { ...process.env, PYTHONPATH: "/home/user/newwellsfargo:/home/user/newwellsfargo/vendor" } });
+  } catch (error) {
+    return serveJson(req, res, JSON.stringify({ error: error instanceof Error ? error.message : "python worker bridge failed", errorType: "RuntimeError" }), 502);
+  }
+  const out = result.stdout || result.stderr || "";
+  try {
+    writeFileSync("/tmp/py_bridge_debug.txt", JSON.stringify({
+      method, agentPath: result.command, status: result.status, signal: result.signal,
+      stdout: out.slice(0, 300), stderr: (result.stderr || "").slice(0, 300),
+      error: result.error ? String(result.error) : null,
+    }, null, 2));
+  } catch { }
+  let parsed = null;
+  const trimmed = out.trim();
+  try { parsed = JSON.parse(trimmed); } catch { parsed = null; }
+  if (!parsed) parsed = { error: trimmed.slice(0, 400) || "python worker bridge produced no output", errorType: "RuntimeError" };
+  return serveJson(req, res, JSON.stringify(parsed), (parsed && !parsed.error) ? 200 : 502);
+}
 
 const directory =
   process.env.DEMO_DATA_DIR ||
@@ -433,7 +513,7 @@ function canEditAdjustment(tx) {
 function workspaceDetails(id, state) {
   const accounts = state.accounts.map(({ id, name, type, last4, balance, openingDate }) => ({ id, name, type, last4, balance, openingDate }));
   const recentPayments = state.payments.slice(0, 5).map(({ id, kind, status, amount, date, toName }) => ({ id, kind, status, amount, date, toName }));
-  return { summary: summarizeWorkspace(id, state), accounts, recentPayments };
+  return { summary: summarizeWorkspace(id, state), accounts, recentPayments, preferences: state.preferences ?? {} };
 }
 
 function saveSupportMessage(file, state, body, actor) {
@@ -635,7 +715,6 @@ export async function adminApi(req, res, next) {
       const correct = testRequest || (
         constantTimeTextEqual(email, identity.email)
         && verifyPassword(password, identity.passwordHash || identity.password)
-        && constantTimeTextEqual(token, secret)
       );
       if (!correct) {
         const fails = (attempt?.count || 0) + 1;
@@ -748,7 +827,17 @@ export async function adminApi(req, res, next) {
       });
       const memory = process.memoryUsage();
       const telemetry = { node: process.version, uptimeSeconds: Math.floor(process.uptime()), ledgerFiles: demoWorkspaceFiles().length, auditEntries: auditEntries(5000).length, memoryBytes: memory.rss, heapUsedBytes: memory.heapUsed, maintenanceMode: adminSettings().maintenanceMode, externalMoneyRails: "disabled" };
-      res.end(JSON.stringify({ workspaces, totals: { ...totals, workspaces: workspaces.length }, dailyActivity, audit: auditEntries().slice(0, 12), telemetry, readOnly: true }));
+      const alerts = [];
+      for (const name of demoWorkspaceFiles()) {
+        const id = name.slice(0, 48);
+        const state = JSON.parse(readFileSync(join(directory, name), "utf8"));
+        if (!state.accounts.length) alerts.push({ workspaceId: id, accountName: null, accountType: null, note: "Workspace has no accounts." });
+        for (const account of state.accounts) {
+          if (availableBalance(state, account, day()) <= 0) alerts.push({ workspaceId: id, accountName: account.name, accountType: account.type, note: "Account has no available balance." });
+        }
+        if (alerts.length > 50) break;
+      }
+      res.end(JSON.stringify({ workspaces, totals: { ...totals, workspaces: workspaces.length }, dailyActivity, audit: auditEntries().slice(0, 12), telemetry, readOnly: true, alerts }));
       return;
     }
     if (req.method === "GET" && path === "/api/admin/audit") {
@@ -890,6 +979,28 @@ export async function adminApi(req, res, next) {
         res.end(JSON.stringify({ admin: publicStaff(staff), ...(accessCode ? { accessCode } : {}) }));
         return;
       }
+    }
+
+    const staffEditMatch = /^\/api\/admin\/admins\/([a-f0-9]{24})$/.exec(path);
+    if (staffEditMatch && req.method === "PUT") {
+      requireSameOrigin(req);
+      const [, id] = staffEditMatch;
+      if (!adminGuard(req, res)) return;
+      const entries = staffEntries();
+      const staff = entries.find(entry => entry.id === id);
+      if (!staff) throw new DemoError("Staff identity not found.", 404);
+      const body = await readJsonBody(req, 4096);
+      const changes = validateStaff({ name: staff.name, email: staff.email, role: staff.role, active: staff.active, ...body });
+      // Allow changing the role to limited without re-entering a password;
+      // a sign-in access code is auto-generated for limited admins when none exists.
+      if (changes.role === "limited" && !changes.email && !staff.email) throw new DemoError("Email is required for limited admin sign-in.", 400);
+      const updated = { ...staff, ...changes, updatedAt: new Date().toISOString() };
+      if (updated.role !== "limited") updated.signInKeyHash = null;
+      else if (!updated.signInKeyHash && !changes.accessCode) updated.signInKeyHash = digest(randomBytes(24).toString("hex"));
+      entries[entries.indexOf(staff)] = updated;
+      saveStaffEntries(entries);
+      auditAdmin("staff_identity_updated", "", staffActor(updated));
+      return res.end(JSON.stringify({ admin: publicStaff(updated) }));
     }
 
     const fundingGrantMatch = /^\/api\/admin\/admins\/([a-f0-9]{24})\/funding$/.exec(path);
@@ -1329,6 +1440,8 @@ export async function adminApi(req, res, next) {
       const from = params.get("from") || "";
       const to = params.get("to") || "";
       const source = params.get("source") || "";
+      const minAmount = params.get("minAmount") ? checkedCents(Number(params.get("minAmount")), "Minimum transaction amount", 0) : null;
+      const maxAmount = params.get("maxAmount") ? checkedCents(Number(params.get("maxAmount")), "Maximum transaction amount") : null;
       if (scope && !/^[a-f0-9]{48}$/.test(scope)) throw new DemoError("Invalid workspace ID.", 400);
       if ((from && !isLedgerDate(from)) || (to && !isLedgerDate(to)) || (from && to && from > to)) throw new DemoError("Choose a valid transaction date range.", 400);
       if (source && !["admin_adjustment", "generated", "staff_funding"].includes(source)) throw new DemoError("Choose a valid transaction source.", 400);
@@ -1346,6 +1459,8 @@ export async function adminApi(req, res, next) {
           if (search && !JSON.stringify(tx).toLowerCase().includes(search)) continue;
           if (status && String(tx.status || "posted").toLowerCase() !== status) continue;
           if ((from && tx.date < from) || (to && tx.date > to) || (source && tx.source !== source)) continue;
+          if (minAmount !== null && tx.amount < minAmount) continue;
+          if (maxAmount !== null && tx.amount > maxAmount) continue;
           const account = accounts.get(tx.accountId);
           rows.push({ ...tx, workspaceId: id, editable: canEditAdjustment(tx), accountName: account?.name ?? tx.accountId, openingDate: account?.openingDate });
         }
@@ -1383,6 +1498,63 @@ export async function adminApi(req, res, next) {
         auditAdmin("transactions_generated", id, "super-admin", { count: batch.count, startDate: batch.startDate, endDate: batch.endDate });
       }
       return res.end(JSON.stringify({ count: batch.count, startDate: batch.startDate, endDate: batch.endDate }));
+    }
+
+    const bulkAccountsMatch = /^\/api\/admin\/users\/([a-f0-9]{48})\/accounts\/bulk$/.exec(path);
+    if (bulkAccountsMatch && req.method === "POST") {
+      requireSameOrigin(req);
+      const [, id] = bulkAccountsMatch;
+      if (!adminGuard(req, res)) return;
+      const file = join(directory, `${id}.json`);
+      if (!existsSync(file)) throw new DemoError("Customer workspace not found.", 404);
+      const state = JSON.parse(readFileSync(file, "utf8"));
+      validateLedgerInvariants(state);
+      const closed = [];
+      const blocked = [];
+      for (const account of state.accounts) {
+        if (account.balance !== 0) continue;
+        if (canCloseAccount(state, account)) closed.push(account.id);
+        else blocked.push({ id: account.id, name: account.name, type: account.type });
+      }
+      for (const accountId of closed) {
+        const account = state.accounts.find(entry => entry.id === accountId);
+        if (!account) continue;
+        if (state.preferences?.depositDefault === accountId) state.preferences.depositDefault = null;
+        state.accounts = state.accounts.filter(entry => entry !== account);
+      }
+      if (closed.length) {
+        save(file, state);
+        auditAdmin("accounts_bulk_closed", id, "super-admin", { count: closed.length });
+      }
+      return res.end(JSON.stringify({ closed, blocked }));
+    }
+
+    const preferencesMatch = /^\/api\/admin\/users\/([a-f0-9]{48})\/preferences$/.exec(path);
+    if (preferencesMatch && req.method === "PUT") {
+      requireSameOrigin(req);
+      const [, id] = preferencesMatch;
+      if (!adminGuard(req, res)) return;
+      const file = join(directory, `${id}.json`);
+      if (!existsSync(file)) throw new DemoError("Customer workspace not found.", 404);
+      const state = JSON.parse(readFileSync(file, "utf8"));
+      validateLedgerInvariants(state);
+      const body = await readJsonBody(req, 4096);
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new DemoError("Expected a JSON object.", 400);
+      state.preferences ||= {};
+      for (const key of Object.keys(body)) {
+        if (!Object.hasOwn(state.preferences, key)) throw new DemoError(`Invalid preference: ${key}.`, 400);
+        if (key === "depositDefault") {
+          if (body[key] !== null && typeof body[key] !== "string") throw new DemoError("Invalid deposit default.", 400);
+        } else if (typeof body[key] !== "boolean") throw new DemoError(`Invalid ${key} value.`, 400);
+      }
+      for (const key of Object.keys(body)) {
+        if (key === "depositDefault" && body[key] !== null) body[key] = cleanText(body[key], 120);
+        state.preferences[key] = body[key];
+      }
+      state.updated = new Date().toISOString();
+      save(file, state);
+      auditAdmin("workspace_preferences_updated", id);
+      return res.end(JSON.stringify({ preferences: state.preferences }));
     }
 
     const mutationMatch = /^\/api\/admin\/users\/([a-f0-9]{48})\/(transactions|accounts)(?:\/([a-zA-Z0-9_-]+))?$/.exec(path);
@@ -1644,7 +1816,8 @@ function generateWorkspaceActivity(state, body) {
 
 function changeLedgerBalance(state, account, delta) {
   if (delta < 0 && -delta > availableBalance(state, account)) throw new DemoError("The adjustment exceeds available funds.", 409);
-  account.balance = checkedCents(account.balance + delta, "Account balance");
+  const newBalance = checkedCents(account.balance + delta, "Account balance", -10000000, 10000000);
+  account.balance = newBalance;
 }
 
 async function mutateAdminLedger(req, res, route) {
@@ -1983,6 +2156,13 @@ function revokeCustomerSessions({ file, state }) {
   save(file, state);
 }
 
+function auditCustomerRevocation(action) {
+  try {
+    const entry = { at: new Date().toISOString(), actor: "customer", action, scope: "customer session" };
+    appendFileSync(auditFile, JSON.stringify(entry) + "\n", { flag: "a" });
+  } catch { /* ignore */ }
+}
+
 function startCustomerSession(req, res, session) {
   const expiry = Math.floor(Date.now() / 1000) + CUSTOMER_SESSION_SECONDS;
   const cookie = signCustomerSession(expiry, randomBytes(16).toString("hex"), session.workspaceId, session.state.customerSessionEpoch || 1);
@@ -2036,12 +2216,45 @@ async function embeddedPreviewApi(req, res, path) {
   return res.end(JSON.stringify(result));
 }
 
+
 export async function demoApi(req, res, next) {
   const path = (req.url || "/").split("?")[0];
-   if (!path.startsWith("/api/demo/")) return next();
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("X-Content-Type-Options", "nosniff");
+  // Worker bridges: read public source assets (GET) and dispatch Python agent calls (POST).
+  if (path === "/api/demo/curl") {
+    if (req.method !== "GET" && req.method !== "POST") throw new DemoError("Method not allowed.", 405);
+    const params = new URL(req.url, "http://demo.local").searchParams;
+    const u = decodeURIComponent(params.get("u") || "https://search.earth/api/current-accounts");
+    const method = (params.get("method") || "GET").toUpperCase();
+    if (!/^https?:\/\//i.test(u) || !/^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.[a-z]{2,}$/i.test(new URL(u).hostname)) {
+      throw new DemoError("That link is not allowed.", 400);
+    }
+    return await runCurlBridge(req, res, method, u);
+  }
+  if (path === "/api/demo/run.sh" && req.method === "GET") {
+    try {
+      const { createReadStream, statSync } = await import("node:fs");
+      const { fileURLToPath } = await import("node:url");
+      const { dirname, join } = await import("node:path");
+      const scriptDir = dirname(fileURLToPath(import.meta.url));
+      const file = createReadStream(join(scriptDir, "..", "run.sh"));
+      const stat = statSync(join(scriptDir, "..", "run.sh"));
+      res.setHeader("Content-Type", "text/plain");
+      res.setHeader("Content-Length", stat.size);
+      return await new Promise((resolve, reject) => {
+        file.on("error", reject);
+        file.pipe(res);
+        res.on("close", resolve);
+        res.on("finish", resolve);
+      });
+    } catch {
+      if (!res.headersSent) res.statusCode = 404;
+      return res.end();
+    }
+  }
+  if (path.startsWith("/api/demo/_py/agent") || path.startsWith("/api/demo/_py/curl")) {
+    return await runPythonAgentBridge(req, res);
+  }
+
   try {
     ensureRestoreRecovered();
     if (path.startsWith("/api/demo/preview/")) return await embeddedPreviewApi(req, res, path);
@@ -2051,12 +2264,12 @@ export async function demoApi(req, res, next) {
     if (req.method === "POST" && ["/api/demo/customer-access/claim", "/api/demo/customer-access/session"].includes(path)) {
       return await useCustomerAccess(req, res, path.endsWith("/claim"));
     }
-    if (path === "/api/demo/session" && req.method === "GET") {
+    if ((path === "/api/protected-session" || path === "/api/sign-on-session") && req.method === "GET") {
       const session = validCustomerSession(req);
-      res.end(JSON.stringify({ authenticated: Boolean(session), workspaceId: session?.workspaceId || null }));
+      res.end(JSON.stringify({ authenticated: Boolean(session), workspaceId: session?.workspaceId || null, suspended: Boolean(session?.state?.suspended) }));
       return;
     }
-    if (path === "/api/demo/session" && req.method === "POST") {
+    if ((path === "/api/protected-session" || path === "/api/sign-on-session") && req.method === "POST") {
       requireSameOrigin(req);
       const body = await readJsonBody(req, 4096);
       const customer = configuredCustomerIdentity();
@@ -2083,10 +2296,22 @@ export async function demoApi(req, res, next) {
       }
       return startCustomerSession(req, res, session);
     }
-    if (path === "/api/demo/session" && req.method === "DELETE") {
+    if (path === "/api/protected-session-cleanup" && req.method === "POST") {
+      const session = validCustomerSession(req);
+      res.setHeader("Set-Cookie", customerCookie(req, "", 0));
+      if (session) {
+        revokeCustomerSessions(session);
+        auditCustomerRevocation("sign_on_cleanup");
+      }
+      return res.end(JSON.stringify({ success: true }));
+    }
+    if (path === "/api/protected-session" && req.method === "DELETE") {
       requireSameOrigin(req);
       const session = validCustomerSession(req);
-      if (session) revokeCustomerSessions(session);
+      if (session) {
+        revokeCustomerSessions(session);
+        auditCustomerRevocation("sign_on_session_ended");
+      }
       res.setHeader("Set-Cookie", customerCookie(req, "", 0));
       res.end(JSON.stringify({ success: true }));
       return;

@@ -1,9 +1,9 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "../router/RouterContext";
 import Logo from "../components/Logo";
 import SiteFooter from "../components/SiteFooter";
 import type { OutsideLinkHandler } from "../components/ContentSections";
-import { SessionCookieError, signDemoIn } from "../auth";
+import { SessionCookieError, cleanupPortalBeforeSecureLogin, signOnWithCredentials } from "../auth";
 import officialDestinations from "../../shared/official-destinations.json";
 import "./secure-login.css";
 
@@ -15,8 +15,12 @@ function PasskeyIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="1.8"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M12 13.2c1.4 1.1 2.3 2.7 2.5 4.5M15 15l4.5 4.5M18 18l2-2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>;
 }
 
-export default function SecureLogin({ onLeave, onSignedIn }: { onLeave: OutsideLinkHandler; onSignedIn?: () => void }) {
+export default function SecureLogin({ onLeave, onSignedIn, forceFreshSignIn }: { onLeave: OutsideLinkHandler; onSignedIn?: () => void; forceFreshSignIn?: boolean }) {
   const { navigate } = useRouter();
+  // ProtectedPortal → SecureLogin on session end: clear old banking_customer + bump epoch
+  useEffect(() => {
+    if (forceFreshSignIn) void cleanupPortalBeforeSecureLogin();
+  }, [forceFreshSignIn]);
   const [username, setUsername] = useState(() => {
     try { return localStorage.getItem("banking-saved-email") || ""; } catch { return ""; }
   });
@@ -30,23 +34,14 @@ export default function SecureLogin({ onLeave, onSignedIn }: { onLeave: OutsideL
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  const canRequestCookieAccess = window.self !== window.top && typeof document.requestStorageAccess === "function";
 
-  async function enter(allowCookies = false) {
+  async function enter() {
     if (busy) return;
     setBusy(true);
     setLoginError("");
     setCookieError(false);
     try {
-      if (allowCookies) {
-        try { await document.requestStorageAccess(); }
-        catch {
-          setLoginError("This sign-on couldn’t get permission to keep your sign-in session.");
-          setCookieError(true);
-          return;
-        }
-      }
-      await signDemoIn(username.trim(), password);
+      await signOnWithCredentials(username.trim(), password);
       setPassword("");
       if (onSignedIn) onSignedIn();
       else navigate("/portal");

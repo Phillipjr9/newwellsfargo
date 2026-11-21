@@ -4,7 +4,7 @@ import Header from "./components/Header";
 import SiteFooter from "./components/SiteFooter";
 import ExternalLinkDialog from "./components/ExternalLinkDialog";
 import { RouterProvider, useRouter } from "./router/RouterContext";
-import { checkDemoSession } from "./auth";
+import { checkPortalSession } from "./auth";
 
 // The public product and help pages are rendered from the original public source.
 import HomePage from "./pages/HomePage";
@@ -40,7 +40,7 @@ function ProtectedPortal({ onLeave }: { onLeave: (url: string) => void }) {
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    void checkDemoSession(AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]))
+    void checkPortalSession()
       .then((ok) => { if (!controller.signal.aborted) setSession(ok ? "signedIn" : "signedOut"); })
       .catch(() => { if (!controller.signal.aborted) setSession("unavailable"); });
     const expired = () => setSession("signedOut");
@@ -49,7 +49,7 @@ function ProtectedPortal({ onLeave }: { onLeave: (url: string) => void }) {
   }, [retry]);
   if (session === "checking") return null;
   if (session === "unavailable") return <main className="public-page-error"><h1>Online banking unavailable</h1><p>Please try again in a moment.</p><button className="wf-button" onClick={() => { setSession("checking"); setRetry((n) => n + 1); }}>Retry</button></main>;
-  if (session === "signedOut") return <SecureLogin onLeave={onLeave} onSignedIn={() => setSession("signedIn")} />;
+  if (session === "signedOut") return <SecureLogin onLeave={onLeave} onSignedIn={() => setSession("signedIn")} forceFreshSignIn />;
   return <BankingWorkspace onLeave={onLeave} />;
 }
 

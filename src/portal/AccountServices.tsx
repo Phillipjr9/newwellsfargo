@@ -34,6 +34,8 @@ import {
 } from "./model";
 import { ErrorMessage, MissingPage } from "./Payments";
 import { runCommand } from "./store";
+export { AccountDetails } from "./AccountDetails";
+export type { Workspace, Account, Entry };
 
 function downloadFile(name: string, content: string, type = "text/plain") {
   const url = URL.createObjectURL(new Blob([content], { type }));

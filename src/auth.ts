@@ -4,7 +4,7 @@ export class SessionCookieError extends Error {
   }
 }
 
-// Only a disposable sample ledger uses this credential. Keep it in memory;
+// Only a disposable preview ledger uses this credential. Keep it in memory;
 // never put it in a URL, browser storage, or a customer/admin request.
 let previewToken = "";
 export const isPreviewSession = () => previewToken !== "";
@@ -13,34 +13,64 @@ export function previewSessionHeaders(): Record<string, string> {
   return previewToken ? { "X-Workspace-Preview-Session": previewToken } : {};
 }
 
-export async function checkDemoSession(signal?: AbortSignal, cookieOnly = false) {
-  const preview = !cookieOnly && isPreviewSession();
-  const response = await fetch(`/api/demo/${preview ? "preview/" : ""}session`, {
-    credentials: preview ? "omit" : "same-origin", headers: preview ? previewSessionHeaders() : undefined, cache: "no-store", signal,
+async function signOnRequest(path: string, body: Record<string, string>) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.authenticated !== true) {
+    throw new Error(result.error || "Online banking is unavailable. Please try again.");
+  }
+  return result;
+}
+
+export async function checkPortalSession(): Promise<boolean> {
+  const response = await fetch("/api/protected-session", {
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: AbortSignal.timeout(10000),
   });
   if (!response.ok || !response.headers.get("Content-Type")?.includes("application/json")) {
     throw new Error("Online banking is unavailable. Please try again.");
   }
-  const authenticated = (await response.json()).authenticated === true;
-  if (preview && !authenticated) clearPreviewSession();
-  return authenticated;
+  return (await response.json()).authenticated === true;
 }
 
-async function signInRequest(path: string, credentials: RequestCredentials, body: Record<string, string> = {}) {
-  const response = await fetch(path, {
-    method: "POST", credentials, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+export async function endPortalSession(): Promise<void> {
+  await fetch("/api/protected-session", {
+    method: "DELETE",
+    credentials: "same-origin",
+    cache: "no-store",
     signal: AbortSignal.timeout(10000),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || result.authenticated !== true) throw new Error(result.error || "Online banking is unavailable. Please try again.");
-  return result;
+  }).catch(() => undefined);
+  try {
+    window.dispatchEvent(new Event("workspace-session-ended"));
+  } catch { /* no listeners */ }
 }
 
-export async function signDemoIn(email: string, password: string) {
-  await signInRequest("/api/demo/session", "same-origin", { email, password });
-  if (await checkDemoSession(AbortSignal.timeout(10000), true)) {
-    clearPreviewSession();
-    return;
-  }
-  throw new SessionCookieError();
+export async function clearPortalCookie(): Promise<void> {
+  await fetch("/api/protected-session-cleanup", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: AbortSignal.timeout(10000),
+  }).catch(() => undefined);
+}
+
+export async function cleanupPortalBeforeSecureLogin(): Promise<void> {
+  await endPortalSession();
+  await clearPortalCookie();
+}
+
+export async function signOnWithCredentials(email: string, password: string) {
+  await signOnRequest("/api/protected-session", { email, password });
+  if (!(await checkPortalSession())) throw new SessionCookieError();
+}
+
+export async function signOffFromPortal() {
+  await endPortalSession();
 }

@@ -78,6 +78,14 @@ interface AdminData {
   audit: AuditEntry[];
   telemetry?: { node: string; uptimeSeconds: number; ledgerFiles: number; auditEntries: number; memoryBytes: number; heapUsedBytes: number; maintenanceMode: boolean; externalMoneyRails: string };
   readOnly: true;
+  alerts: AdminAlert[];
+}
+
+interface AdminAlert {
+  workspaceId: string;
+  accountName: string | null;
+  accountType: string | null;
+  note: string;
 }
 
 interface AuditEntry {
@@ -170,17 +178,18 @@ function Trend({ rows }: { rows: AdminData["dailyActivity"] }) {
 }
 
 function Login({ enabled, statusError, onLogin, onLeave }: { enabled: boolean; statusError: string; onLogin: () => void; onLeave?: (url: string) => void }) {
-  const [token, setToken] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [cookieError, setCookieError] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setCookieError(false);
     try {
-      await api("session", { method: "POST", body: JSON.stringify({ token }) });
+      await api("session", { method: "POST", body: JSON.stringify({ email, password }) });
       const status = await api<AdminSession>("session");
       if (!status.authenticated) { setCookieError(true); setError("This browser didn't keep your admin session."); return; }
-      setToken("");
+      setEmail(""); setPassword("");
       onLogin();
     }
     catch (e) { setError(e instanceof Error ? e.message : "Admin access unavailable."); }
@@ -193,12 +202,14 @@ function Login({ enabled, statusError, onLogin, onLeave }: { enabled: boolean; s
       <h1>Administration</h1>
       <p className="ad-login-copy">Manage the banking workspace administration console. This console is separate from Wells Fargo production systems and customer accounts.</p>
       <form onSubmit={submit}>
-        <label htmlFor="admin-access-token">Admin access code</label>
-        <input id="admin-access-token" name="admin-code" type="password" autoComplete="off" required value={token} onChange={e => setToken(e.target.value)} placeholder="Enter server access code"/>
+        <label htmlFor="admin-email">Super administrator email</label>
+        <input id="admin-email" name="admin-email" type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@example.com"/>
+        <label htmlFor="admin-password">Password</label>
+        <input id="admin-password" name="admin-password" type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter password"/>
         {error && <p className="ad-login-error" role="alert">{error}{cookieError && <> <a href={window.location.href} target="_blank" rel="noopener noreferrer">Open admin sign-in in a new tab</a> and try again.</>}</p>}
-        <button className="ad-primary-btn" disabled={!enabled || busy}>{busy ? "Verifying…" : "Open admin console"}<ArrowRight size={16}/></button>
+        <button className="ad-primary-btn" disabled={!enabled || busy}>{busy ? "Opening…" : "Open admin console"}<ArrowRight size={16}/></button>
       </form>
-      {!enabled && <p className="ad-demo-hint">{statusError || "Configure the server access code to enable admin access."}</p>}
+      {!enabled && <p className="ad-demo-hint">{statusError || "Super administrator email and password are required to open the console."}</p>}
       <p className="ad-login-foot"><ShieldCheck size={15}/> Activity is limited to configured workspaces.</p>
       <a className="ad-link-btn" href="/admin/limited">Limited admin sign-in</a>
     </section>
@@ -216,6 +227,7 @@ function Overview({ data, onSelect }: { data: AdminData; onSelect: (id: string) 
   return <>
     <div className="ad-page-intro"><div><p className="ad-eyebrow">OPERATIONS</p><h1>System overview</h1><p>Live aggregates from workspace activity. No real customers or accounts are processed.</p></div><span className="ad-live"><i/> Local administration API</span></div>
     <section className="ad-kpis">{kpis.map(({label,value,delta,icon:Icon,tone})=><article className="ad-kpi" key={label}><span className={`ad-kpi-icon ${tone}`}><Icon size={19}/></span><span className="ad-kpi-title">{label}</span><strong>{value}</strong><small>{delta}</small></article>)}</section>
+    <AlertsPanel alerts={data.alerts}/>
     <div className="ad-main-grid">
       <section className="ad-panel ad-trend-panel"><div className="ad-panel-head"><div><p className="ad-eyebrow">BANKING PLATFORM</p><h2>Ledger activity</h2></div><span className="ad-select-label">Last 7 days</span></div><Trend rows={data.dailyActivity}/><div className="ad-chart-legend"><span><i/> Transaction entries dated that day</span><span>Workspace ledger only · not bank traffic</span></div></section>
       <section className="ad-panel ad-platform-panel"><div className="ad-panel-head"><div><p className="ad-eyebrow">WORKSPACE STATUS</p><h2>Environment status</h2></div><ShieldCheck size={19} className="ad-ok"/></div><div className="ad-environment"><span>Public website</span><strong><i/> Read-only source pages</strong></div><div className="ad-environment"><span>Ledger API</span><strong><i/> Operational</strong></div><div className="ad-environment"><span>External money rails</span><strong className="ad-disabled"><i/> Disabled</strong></div><div className="ad-demo-note"><ShieldCheck size={16}/><span>Balances, recipients, and transactions are workspace records.</span></div></section>
@@ -223,6 +235,15 @@ function Overview({ data, onSelect }: { data: AdminData; onSelect: (id: string) 
     <section className="ad-panel ad-balance-mix"><div className="ad-panel-head"><div><p className="ad-eyebrow">DEPOSIT OVERVIEW</p><h2>Deposit balances</h2></div><span className="ad-readonly-pill"><Eye size={13}/> Anonymized workspace aggregates</span></div><DepositMix checking={data.totals.checkingBalances} savings={data.totals.savingsBalances}/></section>
     <section className="ad-panel ad-table-panel"><div className="ad-panel-head"><div><p className="ad-eyebrow">SESSION INVENTORY</p><h2>Recent workspaces</h2></div><a className="ad-link-btn" href="/admin/workspaces">All workspaces<ArrowRight size={14}/></a></div><WorkspaceTable rows={data.workspaces.slice(0,6)} onSelect={onSelect}/></section>
   </>;
+}
+
+function AlertsPanel({ alerts }: { alerts: AdminData["alerts"] }) {
+  return <section className="ad-panel ad-table-panel">
+    <div className="ad-panel-head"><p className="ad-eyebrow">OPERATIONS</p><h2>Operational alerts</h2><span className="ad-select-label">{alerts.length} active</span></div>
+    <div className="ad-alerts">
+      {alerts.length ? alerts.map(alert => <div className="ad-detail-row" key={`${alert.workspaceId}-${alert.accountName ?? "none"}`}><span><strong>{alert.accountName ?? alert.workspaceId.slice(0, 8)}</strong><small>{alert.accountType ? `${alert.accountType} · workspace ${alert.workspaceId.slice(0, 8)}` : `workspace ${alert.workspaceId.slice(0, 8)}`}</small><small>{alert.note}</small></span></div>) : <p className="ad-muted-empty">No operational alerts.</p>}
+    </div>
+  </section>;
 }
 
 function WorkspaceTable({ rows, onSelect, search = "" }: { rows: WorkspaceSummary[]; onSelect: (id: string) => void; search?: string }) {
@@ -261,6 +282,7 @@ const historyTitles: Record<string, string> = {
   account_created: "Account opened",
   account_updated: "Account updated",
   account_deleted: "Account closed",
+  accounts_bulk_closed: "Accounts closed in bulk",
   transaction_posted: "Manual adjustment posted",
   transaction_updated: "Manual adjustment corrected",
   transaction_deleted: "Manual adjustment removed",
@@ -295,6 +317,7 @@ type CustomerAccess = { status: "not_enrolled" | "invited" | "expired" | "enroll
 type CustomerProfile = { name: string; email: string };
 type SuperWorkspaceDetail = WorkspaceDetail & { history: WorkspaceHistoryData; access: CustomerAccess; profile: CustomerProfile;
   accountControls: { id: string; nickname: string; canClose: boolean }[];
+  preferences: WorkspacePreferences;
 };
 
 function CustomerAccessControls({ id, access, onIssued }: { id: string; access: CustomerAccess; onIssued: (access: CustomerAccess) => void }) {
@@ -521,8 +544,22 @@ function CustomerProfileControls({ id, profile, enrolled, onChanged }: {
 function ManageAccounts({ id, details, onChanged }: { id: string; details: SuperWorkspaceDetail; onChanged: () => void }) {
   const [selected, setSelected] = useState("");
   const [notice, setNotice] = useState("");
+  const [bulkError, setBulkError] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
   const account = details.accounts.find(item => item.id === selected);
   const controls = details.accountControls.find(item => item.id === selected);
+  const zeroBalance = details.accounts.filter(item => item.balance === 0);
+  async function closeZeroBalance() {
+    if (bulkBusy || !zeroBalance.length) return;
+    setBulkBusy(true); setBulkError(""); setNotice("");
+    try {
+      const result = await api<{ closed: string[]; blocked: { id: string; name: string }[] }>(`users/${id}/accounts/bulk`, { method: "POST", body: "{}" });
+      setNotice(result.closed.length ? `Closed ${result.closed.length} zero-balance account${result.closed.length === 1 ? "" : "s"}.` : "No zero-balance accounts were closable.");
+      if (result.blocked.length) setNotice(current => `${current} ${result.blocked.length} account${result.blocked.length === 1 ? " has" : "s have"} activity or a balance and were left open.`);
+      onChanged();
+    } catch (e) { setBulkError(e instanceof Error ? e.message : "Could not close accounts."); }
+    finally { setBulkBusy(false); }
+  }
   return <details className="ad-detail-section ad-setting-card shrink-0">
     <summary>Manage accounts</summary>
     {!details.accounts.length ? <p>No accounts to manage.</p> : <label>Account to manage<select value={account?.id ?? ""} onChange={e => { setSelected(e.target.value); setNotice(""); }}>
@@ -535,6 +572,55 @@ function ManageAccounts({ id, details, onChanged }: { id: string; details: Super
       onChanged();
     }}/>}
     {notice && <p role="status" className="ad-success">{notice}</p>}
+    {bulkError && <p className="ad-alert" role="alert">{bulkError}</p>}
+    <div className="ad-inline-actions"><button className="ad-outline-btn" disabled={bulkBusy || !zeroBalance.length} onClick={() => void closeZeroBalance()}><Trash2 size={14}/>Close zero-balance accounts</button></div>
+  </details>;
+}
+
+type WorkspacePreferences = { hideBalances?: boolean; depositDefault?: string | null; largeTransactions?: boolean; lowBalance?: boolean; paymentAlerts?: boolean; paperless?: boolean; cardLocked?: boolean; inboxRead?: boolean };
+
+const workspacePreferenceLabels: Record<string, string> = {
+  hideBalances: "Hide balances",
+  largeTransactions: "Show large transactions",
+  lowBalance: "Low balance alerts",
+  paymentAlerts: "Payment alerts",
+  paperless: "Paperless statements",
+  cardLocked: "Lock the card",
+};
+
+function PreferencesSection({ id, preferences, accounts, onChanged }: { id: string; preferences: WorkspacePreferences; accounts: WorkspaceDetail["accounts"]; onChanged: () => void }) {
+  const [draft, setDraft] = useState<WorkspacePreferences>({ ...preferences });
+  const [depositDefault, setDepositDefault] = useState(preferences.depositDefault ?? "");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  async function save() {
+    if (busy) return;
+    setBusy(true); setNotice(""); setError("");
+    const draftRecord = draft as Record<string, boolean | string | null>;
+    const body: Record<string, boolean | string | null> = {};
+    for (const key of Object.keys(workspacePreferenceLabels)) if (Object.prototype.hasOwnProperty.call(draftRecord, key)) body[key] = Boolean(draftRecord[key]);
+    body.depositDefault = depositDefault || null;
+    try {
+      const result = await api<{ preferences: WorkspacePreferences }>(`users/${id}/preferences`, { method: "PUT", body: JSON.stringify(body) });
+      setDraft(result.preferences ?? draft);
+      setDepositDefault((result.preferences?.depositDefault as string | undefined) ?? "");
+      setNotice("Preferences saved.");
+      onChanged();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save preferences."); }
+    finally { setBusy(false); }
+  }
+  return <details className="ad-detail-section ad-setting-card shrink-0">
+    <summary>Preferences</summary>
+    {error && <p className="ad-alert" role="alert">{error}</p>}
+    <div className="ad-alerts">
+      {Object.keys(workspacePreferenceLabels).map(key => Object.prototype.hasOwnProperty.call(draft, key) ? <div className="ad-detail-row" key={key}><label><input type="checkbox" checked={Boolean((draft as { [key: string]: boolean })[key])} onChange={e => setDraft({ ...draft, [key]: e.target.checked })}/>{workspacePreferenceLabels[key]}</label></div> : null)}
+      <div className="ad-detail-row"><label>Deposit default<select value={depositDefault} onChange={e => setDepositDefault(e.target.value)} disabled={busy}>
+        <option value="">None</option>
+        {accounts.map(account => <option key={account.id} value={account.id}>{account.name} ····{account.last4}</option>)}
+      </select></label></div>
+    </div>
+    <div className="ad-inline-actions"><button className="ad-primary-small" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save preferences"}</button>{notice && <p className="ad-success" role="status">{notice}</p>}</div>
   </details>;
 }
 
@@ -647,6 +733,7 @@ function WorkspaceDetails({ id, onClose, refresh, onProfileChanged }: { id: stri
         {details.accounts.length ? <AdjustmentForm id={id} accounts={details.accounts} onSaved={() => { setToast("Manual adjustment posted."); refreshDetails(); }}/> : <p>Open an account before posting an adjustment.</p>}
       </details>
       <GenerateActivityForm key={`generate:${id}`} id={id} accounts={details.accounts} disabled={details.access.suspended} onChanged={refreshDetails}/>
+      <PreferencesSection key={`prefs:${id}`} id={id} preferences={details.preferences} accounts={details.accounts} onChanged={refreshDetails}/>
       <CustomerAccessControls key={id} id={id} access={details.access} onIssued={(access) => {
         setDetails(current => current ? { ...current, access } : current);
         void api<SuperWorkspaceDetail>(`workspaces/${id}`).then(result => setDetails(current => current?.summary.id === id ? result : current)).catch(() => {});
@@ -805,12 +892,15 @@ function Transactions() {
   const [source, setSource] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [minAmount, setMinAmount] = useState("");
+  const [maxAmount, setMaxAmount] = useState("");
   const [edit, setEdit] = useState<AdminTransaction | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
-  const query = new URLSearchParams(Object.entries({ search, status, source, from, to }).filter(([, value]) => value)).toString();
+  const moneyCents = (value: string) => (/^\d+(\.\d{1,2})?$/.test(value.trim()) ? String(Math.round(Number(value.trim()) * 100)) : "");
+  const query = new URLSearchParams(Object.entries({ search, status, source, from, to, minAmount: moneyCents(minAmount), maxAmount: moneyCents(maxAmount) }).filter(([, value]) => value)).toString();
   const invalidRange = !!(from && to && from > to);
   useEffect(() => {
     if (invalidRange) return;
@@ -850,6 +940,8 @@ function Transactions() {
         <select aria-label="Transaction source" value={source} onChange={e => setSource(e.target.value)}>
           <option value="">Any source</option>{Object.entries(sources).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
+        <input aria-label="Minimum transaction amount" type="number" min="0" step="0.01" placeholder="Min amount" value={minAmount} onChange={e => setMinAmount(e.target.value)}/>
+        <input aria-label="Maximum transaction amount" type="number" min="0" step="0.01" placeholder="Max amount" value={maxAmount} onChange={e => setMaxAmount(e.target.value)}/>
       </div>
       <div className="ad-table-scroll"><table className="ad-table"><thead><tr><th>DATE</th><th>WORKSPACE / ACCOUNT</th><th>DESCRIPTION</th><th>CATEGORY</th><th>STATUS</th><th>SOURCE</th><th>AMOUNT</th><th>ACTIONS</th></tr></thead>
         <tbody>{!invalidRange && !loading && !error && rows.map(row => <tr key={`${row.workspaceId}:${row.id}`}>
@@ -936,11 +1028,27 @@ function OffboardStaff({ staff, admins, onCancel, onDone }: {
   </section>;
 }
 
+function RevokeSessionsCard() {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  async function revoke() {
+    if (!window.confirm("Revoke all super-administrator sessions? Your current session will end and you will need to sign in again.")) return;
+    setBusy(true); setError(""); setNotice("");
+    try { await api("me/revoke-all-sessions", { method: "POST", body: "{}" }); setNotice("All super-admin sessions revoked. Sign in again to return."); }
+    catch (e) { setError(e instanceof Error ? e.message : "Could not revoke sessions."); }
+    finally { setBusy(false); }
+  }
+  return <div><h2>Sessions</h2><p>Revoke all signed-in super-administrator sessions for this console.</p><div className="ad-inline-actions"><button className="ad-outline-btn" disabled={busy} onClick={() => void revoke()}><LockKeyhole size={15}/>Revoke all sessions</button></div>{error && <p className="ad-alert" role="alert">{error}</p>}{notice && <p className="ad-success" role="status">{notice}</p>}</div>;
+}
+
 function AdminSettings() {
   const [grantFor, setGrantFor] = useState<string | null>(null);
   const [offboarding, setOffboarding] = useState<StaffEntry | null>(null);
   const [root,setRoot]=useState<RootIdentity|null>(null),[admins,setAdmins]=useState<StaffEntry[]>([]),[settings,setSettings]=useState<any>(null);
   const [rootName,setRootName]=useState(""),[rootEmail,setRootEmail]=useState(""),[staffName,setStaffName]=useState(""),[staffEmail,setStaffEmail]=useState(""),[issued,setIssued]=useState<{ email: string; code: string } | null>(null),[staffBusy,setStaffBusy]=useState(false);
+  const [renamingId, setRenamingId] = useState("");
+  const [renameValue, setRenameValue] = useState("");
   const [confirm,setConfirm]=useState(""),[message,setMessage]=useState(""),[error,setError]=useState("");
   useEffect(()=>{let active=true;Promise.all([api<{identity:RootIdentity}>('me'),api<{admins:StaffEntry[]}>('admins'),api<{settings:any}>('settings')]).then(([m,a,s])=>{if(active){setRoot(m.identity);setRootName(m.identity.name);setRootEmail(m.identity.email);setAdmins(a.admins);setSettings(s.settings)}}).catch(e=>{if(active)setError(e instanceof Error?e.message:'Could not load settings.')});return()=>{active=false}},[]);
   async function saveIdentity(){try{const r=await api<{identity:RootIdentity}>('me',{method:'PUT',body:JSON.stringify({name:rootName,email:rootEmail})});setRoot(r.identity);setMessage('Root identity updated.')}catch(e){setError(e instanceof Error?e.message:'Update failed.')}}
@@ -970,6 +1078,14 @@ function AdminSettings() {
   }
   async function saveSettings(){try{const r=await api<{settings:any}>('settings',{method:'PUT',body:JSON.stringify(settings)});setSettings(r.settings);setMessage('Settings saved.')}catch(e){setError(e instanceof Error?e.message:'Save failed.')}}
   async function updateStaff(id:string, changes:{name:string;role:string;active:boolean}){try{const r=await api<{admin:StaffEntry}>(`admins/${id}`,{method:'PUT',body:JSON.stringify(changes)});setAdmins(v=>v.map(a=>a.id===id?r.admin:a));setMessage('Staff identity updated.')}catch(e){setError(e instanceof Error?e.message:'Staff update failed.')}}
+  async function saveRename(person: StaffEntry) {
+    try {
+      const { admin } = await api<{ admin: StaffEntry }>(`admins/${person.id}`, { method: "PUT", body: JSON.stringify({ name: renameValue.trim() }) });
+      setAdmins(current => current.map(row => row.id === admin.id ? admin : row));
+      setMessage("Staff identity updated.");
+      setRenamingId("");
+    } catch (e) { setError(e instanceof Error ? e.message : "Staff update failed."); }
+  }
   async function deleteStaff(id:string){if(!window.confirm('Delete this staff identity?'))return;try{await api(`admins/${id}`,{method:'DELETE',body:'{}'});setAdmins(v=>v.filter(a=>a.id!==id));setMessage('Staff identity deleted.')}catch(e){setError(e instanceof Error?e.message:'Staff deletion failed.')}}
   async function backup(){const r=await fetch('/api/admin/backup',{credentials:'same-origin',headers:{'Content-Type':'application/json'}});if(!r.ok){setError('Backup export failed.');return;}const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='banking-workspace-backup.json';a.click();URL.revokeObjectURL(u);setMessage('Backup downloaded.')}
   const [restoreReview, setRestoreReview] = useState<{ backup: object; workspaces: number; staff: number; assignments: number } | null>(null);
@@ -1005,7 +1121,7 @@ function AdminSettings() {
   }
   async function resetAll(){if(confirm!=="RESET ALL WORKSPACE DATA")return setError('Typed confirmation is required.');try{await api('reset',{method:'POST',body:JSON.stringify({confirmation:'RESET ALL WORKSPACE DATA'})});setMessage('All workspaces reset.');setConfirm('')}catch(e){setError(e instanceof Error?e.message:'Reset failed.')}}
   async function operation(path:string,label:string){try{await api(path,{method:'POST',body:'{}'});setMessage(`${label} completed.`)}catch(e){setError(e instanceof Error?e.message:`${label} failed.`)}}
-  return <><div className="ad-page-intro"><div><p className="ad-eyebrow">CONFIGURATION</p><h1>Admin settings</h1><p>Root identity, staff, settings, backup, and typed destructive operations.</p></div></div>{error&&<p className="ad-alert">{error}</p>}{message&&<p className="ad-success" role="status"><Check size={14}/>{message}</p>}<section className="ad-settings-grid"><article className="ad-panel ad-setting-card"><h2>Root identity</h2>{root&&<><label>Name<input value={rootName} onChange={e=>setRootName(e.target.value)}/></label><label>Email<input value={rootEmail} onChange={e=>setRootEmail(e.target.value)}/></label><button className="ad-primary-small" onClick={saveIdentity}>Save identity</button></>}</article><article className="ad-panel ad-setting-card">
+  return <><div className="ad-page-intro"><div><p className="ad-eyebrow">CONFIGURATION</p><h1>Admin settings</h1><p>Root identity, staff, settings, backup, and typed destructive operations.</p></div></div>{error&&<p className="ad-alert">{error}</p>}{message&&<p className="ad-success" role="status"><Check size={14}/>{message}</p>}<section className="ad-settings-grid"><article className="ad-panel ad-setting-card"><h2>Root identity</h2>{root&&<><label>Name<input value={rootName} onChange={e=>setRootName(e.target.value)}/></label><label>Email<input value={rootEmail} onChange={e=>setRootEmail(e.target.value)}/></label><button className="ad-primary-small" onClick={saveIdentity}>Save identity</button></>}<RevokeSessionsCard/></article><article className="ad-panel ad-setting-card">
     <h2>Staff identities</h2>
     <a className="ad-link-btn" href="/admin/limited">Limited admin sign-in</a>
     <form className="ad-staff-form" onSubmit={addStaff}>
@@ -1019,7 +1135,7 @@ function AdminSettings() {
       <button type="button" className="ad-outline-btn" onClick={() => setIssued(null)}>Dismiss access code</button>
     </div>}
     <div className="ad-staff-list">{admins.map(person => <div className="flex-wrap" key={person.id}>
-      <strong>{person.name}</strong><span>{person.role === "limited" ? "Limited admin" : person.role} · {person.active ? "Active" : "Inactive"}</span>
+      {renamingId === person.id ? <form className="ad-staff-form" onSubmit={e => { e.preventDefault(); void saveRename(person); }}><input required maxLength={120} value={renameValue} onChange={e => setRenameValue(e.target.value)}/><button className="ad-primary-small" disabled={staffBusy}>Save name</button><button type="button" className="ad-outline-btn" disabled={staffBusy} onClick={() => setRenamingId("")}>Cancel</button></form> : <><strong>{person.name}</strong><button type="button" className="ad-outline-btn" disabled={staffBusy || !!offboarding} onClick={() => { setRenamingId(person.id); setRenameValue(person.name); setError(""); }}>Edit name</button></>}<span>{person.role === "limited" ? "Limited admin" : person.role} · {person.active ? "Active" : "Inactive"}</span>
       <button type="button" className="ad-outline-btn" disabled={staffBusy || !!offboarding} onClick={() => updateStaff(person.id, { name: person.name, role: person.role, active: !person.active })}>{person.active ? "Suspend" : "Activate"}</button>
       {person.role === "limited" && <button type="button" className="ad-outline-btn" disabled={staffBusy || !!offboarding} onClick={() => void replaceCode(person)}>Replace code</button>}
       {person.role === "limited" && <span>Funding budget: {money(person.fundingAvailable)}</span>}
