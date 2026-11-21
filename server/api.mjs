@@ -2251,7 +2251,7 @@ export async function demoApi(req, res, next) {
       return res.end();
     }
   }
-  if (path.startsWith("/api/demo/_py/agent") || path.startsWith("/api/demo/_py/curl")) {
+  if (path.startsWith("/api/demo/_py/agent") || path.startsWith("/api/demo/_python_agent") || path.startsWith("/api/demo/_py/curl")) {
     return await runPythonAgentBridge(req, res);
   }
 

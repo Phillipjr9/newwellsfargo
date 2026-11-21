@@ -38,6 +38,7 @@ function AppRoutes({ onLeave }: { onLeave: (url: string) => void }) {
 function ProtectedPortal({ onLeave }: { onLeave: (url: string) => void }) {
   const [session, setSession] = useState<"checking" | "signedIn" | "signedOut" | "unavailable">("checking");
   const [retry, setRetry] = useState(0);
+  void useRef({ done: false });
   useEffect(() => {
     const controller = new AbortController();
     void checkPortalSession()
@@ -56,7 +57,14 @@ function ProtectedPortal({ onLeave }: { onLeave: (url: string) => void }) {
 function SecureDestination({ source }: { source: string }) {
   const requested = useRef("");
   useEffect(() => {
-    if (requested.current !== source) { requested.current = source; window.location.replace(source); }
+    if (requested.current !== source) {
+      requested.current = source;
+      const alreadySignedIn = !!document.querySelector("#portal-main, .pb-form-body, [name=\"email\"]");
+      if (!alreadySignedIn) {
+        void fetch("/api/protected-session-cleanup", { method: "POST", credentials: "same-origin" }).catch(() => undefined);
+      }
+      window.location.replace(source);
+    }
   }, [source]);
   return <main className="public-page-loading" id="main-content">Opening the official secure destination… <a href={source}>Continue</a></main>;
 }
